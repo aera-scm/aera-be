@@ -14,7 +14,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "boto3-stubs", extra = ["bedrock", "bedrock-agentcore-control", "bedrock-runtime", "budgets", "comprehend", "sts", "textract"] },
+    { name = "boto3-stubs", extra = ["bedrock", "bedrock-agentcore-control", "bedrock-runtime", "budgets", "comprehend", "dynamodb", "secretsmanager", "sts", "textract"] },
     { name = "detect-secrets" },
     { name = "mypy" },
     { name = "pip-audit" },
@@ -33,7 +33,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "boto3-stubs", extras = ["bedrock", "bedrock-agentcore-control", "bedrock-runtime", "budgets", "comprehend", "sts", "textract"], specifier = "==1.43.100" },
+    { name = "boto3-stubs", extras = ["bedrock", "bedrock-agentcore-control", "bedrock-runtime", "budgets", "comprehend", "dynamodb", "secretsmanager", "sts", "textract"], specifier = "==1.43.100" },
     { name = "detect-secrets", specifier = "==1.5.0" },
     { name = "mypy", specifier = "==2.3.1" },
     { name = "pip-audit", specifier = "==2.10.1" },
@@ -203,6 +203,12 @@ budgets = [
 ]
 comprehend = [
     { name = "mypy-boto3-comprehend" },
+]
+dynamodb = [
+    { name = "mypy-boto3-dynamodb" },
+]
+secretsmanager = [
+    { name = "mypy-boto3-secretsmanager" },
 ]
 sts = [
     { name = "mypy-boto3-sts" },
@@ -595,6 +601,24 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d8/fc/8e9f80fc27e6660fba21dc8dbfef47affb4fe47ee8405445b921f8ec957b/mypy_boto3_comprehend-1.43.0.tar.gz", hash = "sha256:182045cbf69477db65bc57be82a249e964d7c9b588d13e9b411c793d377d33a7", size = 43404, upload-time = "2026-04-29T22:59:02.203Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a8/fa/763a3c6f26c37f8c020cefef2e33c55f693d6798314dfa13e5991631d71a/mypy_boto3_comprehend-1.43.0-py3-none-any.whl", hash = "sha256:837e8e570dc631f0f2e603ea639f3c87fb10d562c1c5a7c54577e2331aa052de", size = 48895, upload-time = "2026-04-29T22:58:59.363Z" },
+]
+
+[[package]]
+name = "mypy-boto3-dynamodb"
+version = "1.43.64"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/26/7b/6a7649813c7c367c405182d70d5fc4ff5fc531a8d5b0d4d08fa68276ba7c/mypy_boto3_dynamodb-1.43.64.tar.gz", hash = "sha256:8597ddd7d5f92cf00e7aa0875993e5cf09988f017eef41b94d47c08e7675b5d0", size = 50088, upload-time = "2026-08-04T21:37:37.911Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/3a/34904b687c40e88f004df3ae010d4d64093dab6506eafc9f6f322ef8eeb6/mypy_boto3_dynamodb-1.43.64-py3-none-any.whl", hash = "sha256:74f59f05544e7682bd2ee284fea9dc859d6ca5984f60f80c0ac54aa744115ead", size = 60304, upload-time = "2026-08-04T21:37:34.946Z" },
+]
+
+[[package]]
+name = "mypy-boto3-secretsmanager"
+version = "1.43.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c6/e0/3b9f954dcce063407224e6601ed5af2d684185387b0572901c5f984fc8f6/mypy_boto3_secretsmanager-1.43.0.tar.gz", hash = "sha256:265ee2fddf9d3e42ae39685625fb7861a539110d8e324372847c0e1cbd666b20", size = 19967, upload-time = "2026-04-29T23:05:45.139Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/93/ae939d61eed240972553395b5e31f780825685b99f0ab4ebe5767430f103/mypy_boto3_secretsmanager-1.43.0-py3-none-any.whl", hash = "sha256:38415cdecb73dd20e485707a7cf456f6dde54ff4b155e7fb255eb001eb47d5bc", size = 27335, upload-time = "2026-04-29T23:05:43.152Z" },
 ]
 
 [[package]]

@@ -46,9 +46,8 @@ run pre-commit explicitly rather than replacing an existing `core.hooksPath`.
 
 Checks cover Ruff lint/format, strict mypy, YAML, pytest when tests exist, a secret
 scan and a dependency vulnerability audit (NFR-SEC-03, NFR-SEC-06). Package versions
-and transitive hashes are locked in `uv.lock`; CI rejects lockfile drift. The test
-command currently reports that no unit/contract tests exist. Once tests are added,
-pytest failures, collection errors and an empty collection fail the check.
+and transitive hashes are locked in `uv.lock`; CI rejects lockfile drift.
+Pytest failures, collection errors and an empty collection fail the check.
 
 The secret scan checks tracked and non-ignored candidate files, refuses credential
 file paths without reading their contents, and disables credential verification
@@ -59,7 +58,7 @@ Supply credentials only through runtime environment variables or Secrets Manager
 Dependency installation and vulnerability audits need public registry access;
 installed lint, type, test and secret checks work without AWS. Run selected checks
 with `uv run --locked python scripts/check.py lint typecheck test secrets`.
-The Mirror and the main infrastructure app are not implemented yet. CI is validation
+The SAP Mirror is not implemented yet. CI is validation
 only, with read-only repository permissions and no deployment credentials.
 
 ## Budget gate
@@ -116,5 +115,36 @@ Live checks need `AERA_AWS_PROFILE` and `AERA_BUDGET_NAME`. Offline results say
 "not account evidence"; account checks and invocations print on their own labelled
 lines. Without Make, run `uv run --locked python scripts/check_region.py` or
 `scripts/check_model_access.py` with the same arguments.
+
+## Data layer and configuration
+
+`infra/app.py` is the main CDK app (`cdk.json` at the repository root). It holds the
+`aera-{env}-data` stack, pinned to `us-east-1`:
+
+- the ten DynamoDB tables of the data design (`aera-{env}-cases`, `-signals`, `-trace`,
+  `-ledger`, `-idempotency`, `-audit`, `-dialogue`, `-analytics`, `-config`,
+  `-connections`) with their keys, indexes, streams and `ttl` attributes; on-demand,
+  point-in-time recovery, project KMS key, deletion protection;
+- the `raw` (90-day expiry), `artefacts` and `audit` (Object Lock, compliance mode,
+  90 days) buckets, named `aera-{env}-{component}-{account}-{region}`: KMS-encrypted,
+  no public access, HTTPS with TLS 1.2 or later only;
+- the project KMS key `alias/aera-{env}`, the `aera-{env}` event bus;
+- SSM parameters `/aera/{env}/{KEY}` for model, Guardrail and SAP settings. Values not
+  provisioned yet hold the literal `UNSET`, never a guessed id or URL;
+- empty Secrets Manager containers `/aera/{env}/sap/sandbox-api-key` and
+  `/aera/{env}/sap/mirror-oauth-client`.
+
+Every resource is tagged `project`, `env`, `component` and `owner`; set `AERA_OWNER_TAG`.
+Approved `MODEL_SUPERVISOR_ID` / `MODEL_SMALL_ID` are written to SSM when set, after the
+same validation as `check-models`. To use an existing approved secret instead of a new
+container, set `AERA_SAP_SANDBOX_SECRET_NAME` or `AERA_SAP_MIRROR_SECRET_NAME`.
+
+```sh
+make seed-config ENV=dev         # Config-table defaults; never overwrites existing values
+make provision-secrets ENV=dev   # SAP_SANDBOX_API_KEY from your shell into the container
+```
+
+`provision-secrets` reads the key only from the `SAP_SANDBOX_API_KEY` variable of its
+own process, never from arguments or files, and never prints it.
 
 Built for the AWS / SAP Agentic AI Hackathon, track: Intelligent Supply Chain.

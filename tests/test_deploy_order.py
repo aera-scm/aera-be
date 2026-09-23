@@ -173,6 +173,52 @@ def test_nfr_cmp_02_unapproved_region_is_refused_before_any_call(action: str) ->
     assert recorder.events == []
 
 
+@pytest.mark.parametrize(
+    "models",
+    [
+        {
+            "MODEL_SUPERVISOR_ID": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "MODEL_SMALL_ID": "amazon.nova-lite-v1:0",
+        },
+        {"MODEL_SUPERVISOR_ID": "anthropic.claude-sonnet-4-5-20250929-v1:0"},
+    ],
+)
+def test_a_01_deploy_refuses_invalid_model_ids_before_any_call(models: dict[str, str]) -> None:
+    recorder = Recorder()
+
+    with pytest.raises(DeploymentRefusedError, match="MODEL_"):
+        run(
+            "deploy",
+            env_name="dev",
+            profile="aera-test",
+            region="us-east-1",
+            verify=recorder.verify_ok,
+            runner=recorder.runner,
+            environ=models,
+        )
+
+    assert recorder.events == []
+
+
+def test_a_01_deploy_accepts_valid_model_ids() -> None:
+    recorder = Recorder()
+
+    run(
+        "deploy",
+        env_name="dev",
+        profile="aera-test",
+        region="us-east-1",
+        verify=recorder.verify_ok,
+        runner=recorder.runner,
+        environ={
+            "MODEL_SUPERVISOR_ID": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "MODEL_SMALL_ID": "amazon.nova-lite-v1:0",
+        },
+    )
+
+    assert recorder.events == ["verify", "bootstrap", "deploy-all"]
+
+
 def test_unknown_action_is_refused() -> None:
     recorder = Recorder()
 

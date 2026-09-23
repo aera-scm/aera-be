@@ -13,6 +13,8 @@ from check_model_access import model_id_problems
 from check_region import APPROVED_REGION, region_problems
 from check_region import main as region_main
 
+from infra import environments
+
 
 def no_aws(profile: str, region: str) -> NoReturn:
     raise AssertionError("AWS must not be contacted")
@@ -22,7 +24,7 @@ def no_aws(profile: str, region: str) -> NoReturn:
 
 
 def test_nfr_cmp_02_approved_region_is_us_east_1() -> None:
-    assert APPROVED_REGION == "us-east-1"
+    assert APPROVED_REGION == environments.APPROVED_REGION == "us-east-1"
     assert region_problems("us-east-1", {}) == []
 
 

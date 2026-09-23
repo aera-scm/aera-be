@@ -24,6 +24,7 @@ from check_budget import (
     require_budget_arguments,
     verify_with_clients,
 )
+from check_model_access import SMALL_VARIABLE, SUPERVISOR_VARIABLE, model_id_problems
 from check_region import region_problems
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +35,7 @@ ACTIONS = ("budget", "bootstrap", "deploy")
 CDK = ("pnpm", "exec", "cdk")
 BUDGET_APP = "uv run --locked python -m infra.budget_app"
 MAIN_APP = "uv run --locked python -m infra.app"
+MODEL_VARIABLES = (SUPERVISOR_VARIABLE, SMALL_VARIABLE)
 
 Runner = Callable[[Sequence[str], Mapping[str, str]], None]
 Verifier = Callable[[], BudgetReport]
@@ -55,6 +57,7 @@ def run(
     region: str,
     verify: Verifier,
     runner: Runner,
+    environ: Mapping[str, str] | None = None,
 ) -> BudgetReport:
     if env_name not in DEPLOYABLE_ENVIRONMENTS:
         raise DeploymentRefusedError(
@@ -66,6 +69,13 @@ def run(
     problems = region_problems(region, {})
     if problems:
         raise DeploymentRefusedError("; ".join(problems))
+    if action == "deploy":
+        # A-01: approved model ids reach SSM through the data stack; validate them first.
+        models = [(environ or {}).get(name, "").strip() for name in MODEL_VARIABLES]
+        if any(models):
+            problems = model_id_problems(*models)
+            if problems:
+                raise DeploymentRefusedError("; ".join(problems))
     environment = {"AERA_ENV": env_name, "AWS_REGION": region}
     profile_args = ("--profile", profile)
 
@@ -109,6 +119,7 @@ def main(
             region=args.region,
             verify=verify,
             runner=runner,
+            environ=os.environ,
         )
     except (DeploymentRefusedError, BudgetCheckError) as error:
         print(error, file=sys.stderr)

@@ -5,6 +5,9 @@ repository accepts it.
 """
 
 DEPLOYABLE_ENVIRONMENTS: frozenset[str] = frozenset({"dev"})
+# ADR-001 / NFR-CMP-02: one region for everything. Mirrors scripts/check_region.py;
+# a test keeps the two equal.
+APPROVED_REGION = "us-east-1"
 
 
 class EnvironmentRefusedError(ValueError):

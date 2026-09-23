@@ -14,7 +14,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "boto3-stubs", extra = ["budgets", "sts"] },
+    { name = "boto3-stubs", extra = ["bedrock", "bedrock-agentcore-control", "bedrock-runtime", "budgets", "comprehend", "sts", "textract"] },
     { name = "detect-secrets" },
     { name = "mypy" },
     { name = "pip-audit" },
@@ -33,7 +33,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "boto3-stubs", extras = ["budgets", "sts"], specifier = "==1.43.100" },
+    { name = "boto3-stubs", extras = ["bedrock", "bedrock-agentcore-control", "bedrock-runtime", "budgets", "comprehend", "sts", "textract"], specifier = "==1.43.100" },
     { name = "detect-secrets", specifier = "==1.5.0" },
     { name = "mypy", specifier = "==2.3.1" },
     { name = "pip-audit", specifier = "==2.10.1" },
@@ -189,11 +189,26 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+bedrock = [
+    { name = "mypy-boto3-bedrock" },
+]
+bedrock-agentcore-control = [
+    { name = "mypy-boto3-bedrock-agentcore-control" },
+]
+bedrock-runtime = [
+    { name = "mypy-boto3-bedrock-runtime" },
+]
 budgets = [
     { name = "mypy-boto3-budgets" },
 ]
+comprehend = [
+    { name = "mypy-boto3-comprehend" },
+]
 sts = [
     { name = "mypy-boto3-sts" },
+]
+textract = [
+    { name = "mypy-boto3-textract" },
 ]
 
 [[package]]
@@ -538,6 +553,33 @@ wheels = [
 ]
 
 [[package]]
+name = "mypy-boto3-bedrock"
+version = "1.43.89"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a5/50/fe1313c762bc63a829acf4a0f58dc68527c3ab552d8b45e1d51a1a691f8a/mypy_boto3_bedrock-1.43.89.tar.gz", hash = "sha256:cd7515f5d00d45c008eaa62eb174dac6ef21f689778a7d9e3fbb5f7f6418ebab", size = 65761, upload-time = "2026-09-04T21:09:30.772Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/ec/5a5476c839804c2a19d7b576f0bec7215209b6a6587a707a4acbb560c6e3/mypy_boto3_bedrock-1.43.89-py3-none-any.whl", hash = "sha256:a9e589bb616074dcbbac5bb52cd496e8e8ca246766add805f564ae16d1cd1d12", size = 74173, upload-time = "2026-09-04T21:09:29.634Z" },
+]
+
+[[package]]
+name = "mypy-boto3-bedrock-agentcore-control"
+version = "1.43.99"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/09/b3/fae54ec069599fb27a7138f8d4505f192a99aec65bb92980dcbf55d5e779/mypy_boto3_bedrock_agentcore_control-1.43.99.tar.gz", hash = "sha256:75c4e517b4ee28d66be66cacc0d2a2d68973f4c998d82ce9b0766c2f21258bf7", size = 100835, upload-time = "2026-09-21T20:42:24.526Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/8e/3f67d8e5e8ff80b27b8e51fb5538c684066a14ab3591d6a1470081fae681/mypy_boto3_bedrock_agentcore_control-1.43.99-py3-none-any.whl", hash = "sha256:64786da68311d5220cb95c216da79c4aed0344155c2fb3f9567ae0b8fd50131e", size = 110051, upload-time = "2026-09-21T20:42:21.929Z" },
+]
+
+[[package]]
+name = "mypy-boto3-bedrock-runtime"
+version = "1.43.62"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/26/78/542f5804cf0f9e3c1ccbf30917eaa3b4b6002b91965de02d065d7441fc93/mypy_boto3_bedrock_runtime-1.43.62.tar.gz", hash = "sha256:beb70b08ef72cdfd5036bcd3270f2fbac0a2ce5e40f70dfc1d87c4f139d4d7ff", size = 31492, upload-time = "2026-07-31T19:54:15.291Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d9/b2/e3bff20acd290b909f1c28856d6d8d7984f7f7d5bda299d5957f64e97bb3/mypy_boto3_bedrock_runtime-1.43.62-py3-none-any.whl", hash = "sha256:603d9df54da5029fc0d0e3c09b6db33733af53182bee030c0c7af99e88ed3b39", size = 37865, upload-time = "2026-07-31T19:54:13.959Z" },
+]
+
+[[package]]
 name = "mypy-boto3-budgets"
 version = "1.43.15"
 source = { registry = "https://pypi.org/simple" }
@@ -547,12 +589,30 @@ wheels = [
 ]
 
 [[package]]
+name = "mypy-boto3-comprehend"
+version = "1.43.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/fc/8e9f80fc27e6660fba21dc8dbfef47affb4fe47ee8405445b921f8ec957b/mypy_boto3_comprehend-1.43.0.tar.gz", hash = "sha256:182045cbf69477db65bc57be82a249e964d7c9b588d13e9b411c793d377d33a7", size = 43404, upload-time = "2026-04-29T22:59:02.203Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a8/fa/763a3c6f26c37f8c020cefef2e33c55f693d6798314dfa13e5991631d71a/mypy_boto3_comprehend-1.43.0-py3-none-any.whl", hash = "sha256:837e8e570dc631f0f2e603ea639f3c87fb10d562c1c5a7c54577e2331aa052de", size = 48895, upload-time = "2026-04-29T22:58:59.363Z" },
+]
+
+[[package]]
 name = "mypy-boto3-sts"
 version = "1.43.94"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/63/2f/f4b904067f66ca7e754172947da7a4f3e6b1e690825d8beb00bf14018279/mypy_boto3_sts-1.43.94.tar.gz", hash = "sha256:d169e309deecf99cb8a897e34733571fcaa605447e29b9f6a8c32202c82690ce", size = 16946, upload-time = "2026-09-14T22:12:39.635Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/96/67/55eb07da986be10be03a06181848daafede88b354c7b96f703b0e88c43c2/mypy_boto3_sts-1.43.94-py3-none-any.whl", hash = "sha256:4a740ed21a689fc980fe804a4886fbe4ef84281878cf4a87934e38f27386f2cb", size = 21020, upload-time = "2026-09-14T22:12:36.843Z" },
+]
+
+[[package]]
+name = "mypy-boto3-textract"
+version = "1.43.69"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/99/ca/61c494a1ad16e8464282cb59f752b7c650ec4119afc3e23c19dd7af788ac/mypy_boto3_textract-1.43.69.tar.gz", hash = "sha256:45c9495edcdfc472e257f18b888b8f3f9e77406502dc1b48e446e2a828546dbb", size = 21711, upload-time = "2026-08-11T19:25:37.265Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fe/26/bb03ecdb2d646a2d9b1034ea636475ae7b2b40a735f81f8adca23cc97789/mypy_boto3_textract-1.43.69-py3-none-any.whl", hash = "sha256:9c89dcacb7019b5789de6d1559b0ad74996445464c356823562722e90ed6ab7d", size = 30132, upload-time = "2026-08-11T19:25:34.016Z" },
 ]
 
 [[package]]

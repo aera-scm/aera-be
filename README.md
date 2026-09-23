@@ -93,4 +93,28 @@ the existing budget by name and never change it. A failed verification stops bef
 any bootstrap or CloudFormation call. Only `dev` is accepted; `final` is deployed
 from a tagged release, never from a development checkout.
 
+## Region and model checks
+
+All data and processing stay in one region, `us-east-1` (NFR-CMP-02). Model access
+must use direct regional inference (A-01): `MODEL_SUPERVISOR_ID` is a bare Anthropic
+Claude model id and `MODEL_SMALL_ID` a bare Amazon Nova or Claude model id. Geographic
+and global inference profiles (`us.`, `eu.`, `apac.`, `global.`, ...) and ARNs are
+rejected, and every deployment command refuses any other region.
+
+```sh
+make check-region                       # offline: region configuration only
+make check-models                       # offline: model id format and family
+make check-region ARGS="--live"         # budget first, then one read-only list call
+                                        # per service: Guardrails, Automated Reasoning,
+                                        # AgentCore, Textract, Comprehend
+make check-models ARGS="--live"         # budget first, then per model: on demand,
+                                        # ACTIVE, authorized, agreement/entitlement
+make check-models ARGS="--live --invoke"  # plus one Converse call, at most 8 tokens
+```
+
+Live checks need `AERA_AWS_PROFILE` and `AERA_BUDGET_NAME`. Offline results say
+"not account evidence"; account checks and invocations print on their own labelled
+lines. Without Make, run `uv run --locked python scripts/check_region.py` or
+`scripts/check_model_access.py` with the same arguments.
+
 Built for the AWS / SAP Agentic AI Hackathon, track: Intelligent Supply Chain.

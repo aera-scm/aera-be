@@ -24,6 +24,7 @@ from check_budget import (
     require_budget_arguments,
     verify_with_clients,
 )
+from check_region import region_problems
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -61,6 +62,10 @@ def run(
         )
     if action not in ACTIONS:
         raise DeploymentRefusedError(f"Unknown action {action!r}; expected one of {ACTIONS}.")
+    # NFR-CMP-02: child processes get AWS_REGION from here, so only the region matters.
+    problems = region_problems(region, {})
+    if problems:
+        raise DeploymentRefusedError("; ".join(problems))
     environment = {"AERA_ENV": env_name, "AWS_REGION": region}
     profile_args = ("--profile", profile)
 

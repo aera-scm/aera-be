@@ -156,6 +156,23 @@ def test_final_and_unknown_environments_are_refused(action: str, env: str) -> No
     assert recorder.events == []
 
 
+@pytest.mark.parametrize("action", ["budget", "bootstrap", "deploy"])
+def test_nfr_cmp_02_unapproved_region_is_refused_before_any_call(action: str) -> None:
+    recorder = Recorder()
+
+    with pytest.raises(DeploymentRefusedError, match="not the approved region"):
+        run(
+            action,
+            env_name="dev",
+            profile="aera-test",
+            region="eu-west-1",
+            verify=recorder.verify_ok,
+            runner=recorder.runner,
+        )
+
+    assert recorder.events == []
+
+
 def test_unknown_action_is_refused() -> None:
     recorder = Recorder()
 

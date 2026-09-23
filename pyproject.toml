@@ -3,10 +3,15 @@ name = "aera-be"
 version = "0.0.0"
 description = "AERA backend and infrastructure"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "aws-cdk-lib==2.270.0",
+    "boto3==1.43.100",
+    "constructs==10.8.1",
+]
 
 [dependency-groups]
 dev = [
+    "boto3-stubs[budgets,sts]==1.43.100",
     "detect-secrets==1.5.0",
     "mypy==2.3.1",
     "pip-audit==2.10.1",
@@ -35,3 +40,5 @@ exclude = ["^\\.venv/"]
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers"
 norecursedirs = [".git", ".venv", "node_modules", "cdk.out"]
+pythonpath = [".", "scripts", "tests"]
+testpaths = ["tests", "infra/tests"]

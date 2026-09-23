@@ -32,6 +32,7 @@ def check(name: str) -> None:
         run(sys.executable, "scripts/security.py")
     elif name == "audit":
         run("pip-audit", "--local")
+        run("pnpm", "audit", "--audit-level", "low")
     else:
         raise ValueError(f"Unknown check: {name}")
 

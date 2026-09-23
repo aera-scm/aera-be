@@ -17,11 +17,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version-file: .node-version
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: '0.12.18'
           enable-cache: true
-      - name: Install locked Python dependencies
-        run: uv sync --locked
-      - name: Lint, type check, tests, secret scan and dependency audit
+      - name: Install pinned package manager
+        run: npm install --global pnpm@12.5.1
+      - name: Install locked Python and CDK CLI dependencies
+        run: |
+          uv sync --locked
+          pnpm install --frozen-lockfile
+      - name: Lint, type check, tests and synth assertions, secret scan and dependency audits
         run: uv run --locked python scripts/check.py

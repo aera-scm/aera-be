@@ -59,7 +59,38 @@ Supply credentials only through runtime environment variables or Secrets Manager
 Dependency installation and vulnerability audits need public registry access;
 installed lint, type, test and secret checks work without AWS. Run selected checks
 with `uv run --locked python scripts/check.py lint typecheck test secrets`.
-Bootstrap, cloud deployment and the Mirror are not implemented yet. CI is validation
+The Mirror and the main infrastructure app are not implemented yet. CI is validation
 only, with read-only repository permissions and no deployment credentials.
+
+## Budget gate
+
+An AWS Budget with actual-spend alerts at 50, 80 and 100% must exist before any
+other resource, including those created by `cdk bootstrap` (NFR-COST-01, C-02).
+`infra/budget_app.py` is a standalone CDK app holding one native budget resource;
+it deploys with CLI credentials and needs no bootstrap. The CDK CLI is pinned in
+`package.json` and installed with `pnpm install --frozen-lockfile` (Node 24.21.0).
+
+Inputs come from the environment, never from committed files:
+
+| Variable | Meaning |
+|---|---|
+| `AERA_AWS_PROFILE` | named AWS CLI profile |
+| `AERA_REGION` | deployment region (default `us-east-1`) |
+| `AERA_BUDGET_NAME` | budget name |
+| `AERA_BUDGET_LIMIT_USD` | approved monthly amount in USD |
+| `AERA_BUDGET_RECIPIENTS` | comma-separated alert email addresses (budget creation only) |
+
+```sh
+make budget ENV=dev        # deploy the budget stack, then verify it
+make check-budget          # verify amount, period, thresholds and subscribers
+make bootstrap ENV=dev     # verify the budget, then cdk bootstrap
+make deploy ENV=dev        # verify the budget, cdk bootstrap, then cdk deploy --all
+```
+
+Without Make, run `uv run --locked python scripts/deploy_dev.py <action> --env dev`.
+If an approved budget already exists, skip `make budget`; bootstrap and deploy verify
+the existing budget by name and never change it. A failed verification stops before
+any bootstrap or CloudFormation call. Only `dev` is accepted; `final` is deployed
+from a tagged release, never from a development checkout.
 
 Built for the AWS / SAP Agentic AI Hackathon, track: Intelligent Supply Chain.

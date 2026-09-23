@@ -1,0 +1,11 @@
+{
+  "name": "aera-be-tooling",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pinned AWS CDK CLI for the backend infrastructure",
+  "packageManager": "pnpm@12.5.1",
+  "engines": { "node": "24.21.0", "pnpm": "12.5.1" },
+  "devDependencies": {
+    "aws-cdk": "2.1142.0"
+  }
+}

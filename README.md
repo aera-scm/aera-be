@@ -31,10 +31,35 @@ eval/          evaluation harness and cases
 
 ## Getting started
 
+Python 3.12.14 and uv 0.12.18 are pinned for the foundation tooling. Install these
+before running the following commands from this repository:
+
+```sh
+uv sync --locked
+uv run --locked python scripts/check.py
+uv run --locked pre-commit run --all-files
 ```
-make bootstrap
-make mirror-local
-make test
-```
+
+With GNU Make, `make setup`, `make check` and `make hooks` run the same commands.
+The direct commands also work on Windows without Make. Keep existing Git hooks:
+run pre-commit explicitly rather than replacing an existing `core.hooksPath`.
+
+Checks cover Ruff lint/format, strict mypy, YAML, pytest when tests exist, a secret
+scan and a dependency vulnerability audit (NFR-SEC-03, NFR-SEC-06). Package versions
+and transitive hashes are locked in `uv.lock`; CI rejects lockfile drift. The test
+command currently reports that no unit/contract tests exist. Once tests are added,
+pytest failures, collection errors and an empty collection fail the check.
+
+The secret scan checks tracked and non-ignored candidate files, refuses credential
+file paths without reading their contents, and disables credential verification
+network calls. Lockfiles are excluded from secret detection because they contain
+integrity digests; their dependencies are covered by the vulnerability audit.
+Supply credentials only through runtime environment variables or Secrets Manager.
+
+Dependency installation and vulnerability audits need public registry access;
+installed lint, type, test and secret checks work without AWS. Run selected checks
+with `uv run --locked python scripts/check.py lint typecheck test secrets`.
+Bootstrap, cloud deployment and the Mirror are not implemented yet. CI is validation
+only, with read-only repository permissions and no deployment credentials.
 
 Built for the AWS / SAP Agentic AI Hackathon, track: Intelligent Supply Chain.

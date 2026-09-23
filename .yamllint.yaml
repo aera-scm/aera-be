@@ -1,0 +1,12 @@
+extends: default
+rules:
+  document-start: disable
+  line-length:
+    max: 140
+  truthy:
+    check-keys: false
+ignore: |
+  .venv/
+  node_modules/
+  uv.lock
+  pnpm-lock.yaml

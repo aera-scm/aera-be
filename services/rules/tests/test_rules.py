@@ -305,3 +305,8 @@ def test_fr_ing_02_unchanged_date_is_not_actionable() -> None:
 
 def test_no_stockout_without_consumption() -> None:
     assert stockout_at(T0, Decimal("10"), Decimal("0")) is None
+
+
+def test_br_02_threshold_follows_configuration() -> None:
+    assert field_status("PRICE", "42.5", 0.9, min_confidence=0.9) == FieldStatus.CONFIRMED
+    assert field_status("PRICE", "42.5", 0.96, min_confidence=0.97) == FieldStatus.UNCONFIRMED

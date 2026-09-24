@@ -215,6 +215,8 @@ class Signal(Model):
     received_at: datetime
     raw_s3_key: str
     raw_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    # S3 keys of attachments and images stored next to the raw payload (FR-ING-06, FR-ING-09).
+    attachments: list[str] = Field(default_factory=list)
     normalized_text: str | None = None
     guardrail_result: Literal["NOT_SCANNED", "PASSED", "BLOCKED"] = "NOT_SCANNED"
     quarantine_reason: str | None = None

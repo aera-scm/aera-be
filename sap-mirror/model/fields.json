@@ -164,6 +164,7 @@
         "A_BusinessPartner": [
           "Supplier",
           "BusinessPartnerCategory",
+          "BusinessPartnerGrouping",
           "BusinessPartnerFullName",
           "BusinessPartnerName"
         ],

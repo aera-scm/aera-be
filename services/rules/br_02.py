@@ -46,12 +46,14 @@ def field_status(
     *,
     sap_value: str | None = None,
     confirmed_by: str | None = None,
+    min_confidence: float = MIN_CONFIDENCE,
 ) -> FieldStatus:
+    """`min_confidence` comes from config CRITICAL_FIELD_MIN_CONF (default 0.95)."""
     if confirmed_by:
         return FieldStatus.CONFIRMED
     if sap_value is not None and matches_sap(name, value, sap_value):
         return FieldStatus.SAP_MATCHED
-    return FieldStatus.CONFIRMED if confidence >= MIN_CONFIDENCE else FieldStatus.UNCONFIRMED
+    return FieldStatus.CONFIRMED if confidence >= min_confidence else FieldStatus.UNCONFIRMED
 
 
 def usable(field: ExtractedField) -> bool:

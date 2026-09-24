@@ -1,4 +1,4 @@
-"""DynamoDB tables for shared-core tests, built from the same specs as the data stack."""
+"""AWS fakes for service tests: tables built from the same specs as the data stack, bucket, bus."""
 
 from collections.abc import Iterator
 from typing import Any
@@ -57,3 +57,55 @@ def dynamodb(aws: None) -> Any:
             arguments["GlobalSecondaryIndexes"] = indexes
         client.create_table(**arguments)
     return client
+
+
+RAW_BUCKET = "aera-test-raw"
+
+
+@pytest.fixture
+def s3(aws: None) -> Any:
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket=RAW_BUCKET)
+    return client
+
+
+class RecordingBus:
+    """EventBridge stand-in that keeps what was published, in order."""
+
+    def __init__(self) -> None:
+        self.entries: list[dict[str, Any]] = []
+
+    def put_events(self, Entries: list[dict[str, Any]]) -> dict[str, Any]:
+        self.entries.extend(Entries)
+        return {"FailedEntryCount": 0, "Entries": [{"EventId": "x"} for _ in Entries]}
+
+    def types(self) -> list[str]:
+        return [entry["DetailType"] for entry in self.entries]
+
+    def details(self, detail_type: str) -> list[dict[str, Any]]:
+        import json
+
+        return [json.loads(e["Detail"]) for e in self.entries if e["DetailType"] == detail_type]
+
+
+@pytest.fixture
+def bus() -> RecordingBus:
+    return RecordingBus()
+
+
+@pytest.fixture(scope="session")
+def mirror_url() -> Iterator[str]:
+    from mirror_process import AVAILABLE, MISSING, running_mirror
+
+    if not AVAILABLE:
+        pytest.skip(MISSING)
+    with running_mirror() as url:
+        yield url
+
+
+@pytest.fixture
+def sap(mirror_url: str) -> Any:
+    from services.shared.sap_client import Endpoint, SapClient, Target
+
+    endpoint = Endpoint(base_url=mirror_url, target=Target.MIRROR, auth=None)
+    return SapClient(read=endpoint, write=None)

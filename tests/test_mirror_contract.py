@@ -5,17 +5,13 @@ drives it through the same client every AERA component uses. Skipped with a reas
 the Mirror's dependencies are not installed.
 """
 
-import os
 import re
-import shutil
-import subprocess
-import threading
 from collections.abc import Iterator
 from decimal import Decimal
-from pathlib import Path
 
 import httpx
 import pytest
+from mirror_process import AVAILABLE, MISSING, running_mirror
 
 from services.shared.sap_client import (
     Endpoint,
@@ -25,49 +21,15 @@ from services.shared.sap_client import (
     Target,
 )
 
-MIRROR = Path(__file__).resolve().parents[1] / "sap-mirror"
-SERVE = MIRROR / "node_modules" / "@sap" / "cds" / "bin" / "serve.js"
-NODE = shutil.which("node")
 PO = "API_PURCHASEORDER_PROCESS_SRV"
 
-pytestmark = pytest.mark.skipif(
-    NODE is None or not SERVE.exists(), reason="Mirror dependencies not installed (make setup)"
-)
+pytestmark = pytest.mark.skipif(not AVAILABLE, reason=MISSING)
 
 
 @pytest.fixture(scope="module")
 def mirror() -> Iterator[str]:
-    assert NODE is not None
-    process = subprocess.Popen(
-        [NODE, str(SERVE)],
-        cwd=MIRROR,
-        env={
-            **os.environ,
-            "PORT": "0",
-            "NODE_ENV": "development",
-            "SCENARIO_T0": "2026-10-05T08:00:00Z",
-        },
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    assert process.stdout is not None
-    url = None
-    for line in process.stdout:
-        match = re.search(r"server listening on \{ url: '([^']+)'", line)
-        if match:
-            url = match.group(1)
-            break
-    if url is None:
-        process.kill()
-        pytest.fail("Mirror did not start")
-    # Keep draining the log so the server never blocks on a full pipe.
-    threading.Thread(target=lambda: [None for _ in process.stdout or []], daemon=True).start()
-    try:
+    with running_mirror() as url:
         yield url
-    finally:
-        process.kill()
-        process.wait()
 
 
 @pytest.fixture

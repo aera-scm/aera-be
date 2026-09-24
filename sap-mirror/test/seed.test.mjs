@@ -175,3 +175,10 @@ test("master data uses reserved example domains and fiction-reserved phone numbe
   assert.ok(emails.every((e) => e.EmailAddress.endsWith(".example")));
   assert.ok(phones.every((p) => /^\+447700900\d{3}$/.test(p.InternationalPhoneNumber)));
 });
+
+test("business partner grouping tells suppliers from carriers for sender verification (BR-04)", async () => {
+  const partners = await all("API_BUSINESS_PARTNER/A_BusinessPartner?$select=BusinessPartner,BusinessPartnerGrouping");
+  const grouping = Object.fromEntries(partners.map((p) => [p.BusinessPartner, p.BusinessPartnerGrouping]));
+
+  assert.deepEqual(grouping, { 1000234: "SUPL", 1000871: "SUPL", 1000950: "CARR" });
+});

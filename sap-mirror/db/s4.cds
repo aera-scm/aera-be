@@ -144,6 +144,7 @@ entity A_BusinessPartner {
   key BusinessPartner : String(10);
   Supplier : String(10);
   BusinessPartnerCategory : String(1);
+  BusinessPartnerGrouping : String(4);
   BusinessPartnerFullName : String(81);
   BusinessPartnerName : String(81);
 }

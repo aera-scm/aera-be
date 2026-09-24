@@ -29,6 +29,14 @@ SEED = {
     "MAT-60417": ("4500001273", 250, "1000871"),
     "MAT-72055": ("4500001284", 1500, "1000234"),
 }
+ON_HAND = {
+    "MAT-48219": 310,
+    "MAT-51002": 900,
+    "MAT-33871": 400,
+    "MAT-20114": 120,
+    "MAT-60417": 700,
+    "MAT-72055": 2000,
+}
 CONTACTS = {
     "1000234": ("orders@krieger-guss.example", "+447700900234"),
     "1000871": ("sales@halim-presisi.example", "+447700900871"),
@@ -64,31 +72,46 @@ class Artifacts:
 
 
 def mirror_changes(params: Parameters, now: datetime) -> list[dict[str, object]]:
-    """Mutation covers selected PO, MRP row and stock; donor stock permits a STO option."""
+    """Change only state implied by selected exception; keep donor stock available."""
     po, ordered, _ = SEED[params.material]
     target_date = (now.astimezone(UTC) + timedelta(days=params.days_late)).date().isoformat()
     remaining = max(0, ordered - params.quantity_short)
-    changes: list[dict[str, object]] = [
-        {
-            "entity": "A_PurchaseOrderScheduleLine",
-            "where": {
-                "PurchasingDocument": po,
-                "PurchasingDocumentItem": "10",
-                "ScheduleLine": "1",
-            },
-            "set": {"ScheduleLineDeliveryDate": target_date},
-        },
-        {
-            "entity": "MRPExceptionMessage",
-            "where": {"MRPElement": po},
-            "set": {"MRPElementDate": target_date},
-        },
-        {
-            "entity": "A_MatlStkInAcctMod",
-            "where": {"Material": params.material, "Plant": params.plant},
-            "set": {"MatlWrhsStkQtyInMatlBaseUnit": str(remaining)},
-        },
-    ]
+    changes: list[dict[str, object]] = []
+    schedule_where = {"PurchasingDocument": po, "PurchasingDocumentItem": "10", "ScheduleLine": "1"}
+    if params.exception_type in ("SUPPLIER_DELAY", "CARRIER_DELAY"):
+        changes.extend(
+            [
+                {
+                    "entity": "A_PurchaseOrderScheduleLine",
+                    "where": schedule_where,
+                    "set": {"ScheduleLineDeliveryDate": target_date},
+                },
+                {
+                    "entity": "MRPExceptionMessage",
+                    "where": {"MRPElement": po},
+                    "set": {"MRPElementDate": target_date},
+                },
+            ]
+        )
+    else:
+        changes.extend(
+            [
+                {
+                    "entity": "A_PurchaseOrderScheduleLine",
+                    "where": schedule_where,
+                    "set": {"ScheduleLineCommittedQuantity": str(remaining)},
+                },
+                {
+                    "entity": "A_MatlStkInAcctMod",
+                    "where": {"Material": params.material, "Plant": params.plant},
+                    "set": {
+                        "MatlWrhsStkQtyInMatlBaseUnit": str(
+                            max(0, ON_HAND[params.material] - params.quantity_short)
+                        )
+                    },
+                },
+            ]
+        )
     if params.material != "MAT-48219":
         donor = {
             "Material": params.material,
@@ -122,20 +145,41 @@ def mirror_changes(params: Parameters, now: datetime) -> list[dict[str, object]]
 
 def _text(params: Parameters, po: str, date: str) -> str:
     words = {
-        "EN": (
-            "Delivery update. Purchase order {po}, material {material}: "
-            "{qty} units delayed to {date}."
-        ),
-        "ID": (
-            "Pembaruan pengiriman. Pesanan {po}, material {material}: "
-            "{qty} unit tertunda hingga {date}."
-        ),
-        "DE": (
-            "Liefermeldung. Bestellung {po}, Material {material}: "
-            "{qty} Stueck verspaetet bis {date}."
-        ),
+        "SUPPLIER_DELAY": {
+            "EN": (
+                "Supplier delay. Purchase order {po}, material {material}: "
+                "{qty} units delayed to {date}."
+            ),
+            "ID": (
+                "Pemasok terlambat. Pesanan {po}, material {material}: "
+                "{qty} unit tertunda hingga {date}."
+            ),
+            "DE": (
+                "Lieferverzug. Bestellung {po}, Material {material}: "
+                "{qty} Stueck verspaetet bis {date}."
+            ),
+        },
+        "QUANTITY_SHORTFALL": {
+            "EN": "Quantity shortage. Purchase order {po}, material {material}: {qty} units short.",
+            "ID": "Kekurangan jumlah. Pesanan {po}, material {material}: kurang {qty} unit.",
+            "DE": "Mengenfehlmenge. Bestellung {po}, Material {material}: {qty} Stueck fehlen.",
+        },
+        "CARRIER_DELAY": {
+            "EN": (
+                "Carrier delay. Purchase order {po}, material {material}: "
+                "{qty} units now arrive {date}."
+            ),
+            "ID": (
+                "Pengangkut terlambat. Pesanan {po}, material {material}: "
+                "{qty} unit tiba {date}."
+            ),
+            "DE": (
+                "Transportverzug. Bestellung {po}, Material {material}: "
+                "{qty} Stueck kommen {date}."
+            ),
+        },
     }
-    return words[params.language].format(
+    return words[params.exception_type][params.language].format(
         po=po, material=params.material, qty=params.quantity_short, date=date
     )
 

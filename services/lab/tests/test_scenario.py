@@ -48,7 +48,13 @@ def test_fr_lab_02_mutation_tracks_selected_delay_and_shortage() -> None:
         "ScheduleLine": "1",
     }
     assert changes[0]["set"] == {"ScheduleLineDeliveryDate": "2026-10-08"}
-    assert changes[2]["set"] == {"MatlWrhsStkQtyInMatlBaseUnit": "1200"}
+    assert not any(change["entity"] == "A_MatlStkInAcctMod" for change in changes)
+    shortage = mirror_changes(params(exceptionType="QUANTITY_SHORTFALL"), NOW)
+    assert shortage[0]["set"] == {"ScheduleLineCommittedQuantity": "1200"}
+    assert shortage[1]["set"] == {"MatlWrhsStkQtyInMatlBaseUnit": "0"}
+    assert not any(change["entity"] == "MRPExceptionMessage" for change in shortage)
+    carrier = mirror_changes(params(exceptionType="CARRIER_DELAY"), NOW)
+    assert carrier[0]["set"] == {"ScheduleLineDeliveryDate": "2026-10-08"}
     assert all(
         change["entity"]
         in {"A_PurchaseOrderScheduleLine", "MRPExceptionMessage", "A_MatlStkInAcctMod"}
@@ -61,7 +67,7 @@ def test_fr_lab_02_artifacts_include_pdf_noisy_photo_carrier_and_hostile() -> No
     artifacts = generate(chosen, NOW, "01KTEST123456789ABCDEFGHJK")
     pdf_text = "\n".join(page.extract_text() for page in PdfReader(BytesIO(artifacts.pdf)).pages)
     image = Image.open(BytesIO(artifacts.photo))
-    assert "Pembaruan pengiriman" in pdf_text
+    assert "Pemasok terlambat" in pdf_text
     assert "4500001234" in pdf_text
     assert image.format == "PNG" and image.size == (1000, 500)
     assert len(set(image.get_flattened_data())) > 100
@@ -70,3 +76,10 @@ def test_fr_lab_02_artifacts_include_pdf_noisy_photo_carrier_and_hostile() -> No
         artifacts.hostile_email and b"Ignore all previous instructions" in artifacts.hostile_email
     )
     assert b"confirmation-4500001234.pdf" in artifacts.email
+
+
+def test_fr_lab_02_exception_artifacts_describe_distinct_disruptions() -> None:
+    shortage = generate(params(exceptionType="QUANTITY_SHORTFALL"), NOW, "shortage")
+    carrier = generate(params(exceptionType="CARRIER_DELAY"), NOW, "carrier")
+    assert b"Quantity shortage" in shortage.email
+    assert b"Carrier delay" in carrier.email

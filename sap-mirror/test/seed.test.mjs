@@ -115,18 +115,57 @@ test("the option economics of the reference plan add up (SRD 6.6.3)", () => {
   assert.equal(sto.costUsd + air.costUsd, 42_300);
 });
 
-test("214 MRP messages of which exactly six exceed the default tolerance", async () => {
+// FR-ING-02: working days moved, counting weekdays after the earlier date up to the later.
+export function workingDays(fromMs, toMs) {
+  const [low, high] = fromMs < toMs ? [fromMs, toMs] : [toMs, fromMs];
+  let days = 0;
+  for (let t = low + 24 * HOUR; t <= high; t += 24 * HOUR) {
+    const weekday = new Date(t).getUTCDay();
+    if (weekday !== 0 && weekday !== 6) days += 1;
+  }
+  return days;
+}
+
+const actionable = (element, rescheduled) =>
+  rescheduled < element ? workingDays(element, rescheduled) >= 3 : workingDays(element, rescheduled) >= 15;
+
+test("214 MRP messages of which exactly six are outside the working-day tolerance", async () => {
   const messages = await all("ZAERA_MIRROR_SRV/MRPExceptionMessage?$top=1000");
-  const day = 24 * HOUR;
-  const actionable = messages.filter((m) => {
-    const shift = (time(m.MRPReschedulingDate) - time(m.MRPElementDate)) / day;
-    return shift < -3 || shift > 15;
-  });
+  const flagged = messages.filter((m) => actionable(time(m.MRPElementDate), time(m.MRPReschedulingDate)));
 
   assert.equal(messages.length, 214);
-  assert.deepEqual(actionable.map((m) => m.Material).sort(), [
+  assert.deepEqual(flagged.map((m) => m.Material).sort(), [
     "MAT-20114", "MAT-33871", "MAT-48219", "MAT-51002", "MAT-60417", "MAT-72055",
   ]);
+});
+
+test("the six actionable MRP messages stay six whatever weekday T0 falls on", async () => {
+  const { rows } = await import("../scripts/generate-mrp-seed.mjs");
+  const offsetDays = (token) => Number(/^\{T0(?:([+-]\d+)d)?\}$/.exec(token)[1] ?? 0);
+  const lines = rows().trim().split(/\r?\n/).slice(1).map((line) => line.split(","));
+  for (let weekday = 0; weekday < 7; weekday += 1) {
+    const t0 = Date.UTC(2026, 9, 4 + weekday);
+    const count = lines.filter(([, , , , , , , element, rescheduled]) =>
+      actionable(t0 + offsetDays(element) * 24 * HOUR, t0 + offsetDays(rescheduled) * 24 * HOUR),
+    ).length;
+    assert.equal(count, 6, `T0 on weekday ${new Date(t0).getUTCDay()}`);
+  }
+});
+
+test("MAT-48219 is pegged through production order components to the Line 2 car", async () => {
+  const components = await all(
+    "API_PRODUCTION_ORDER_2_SRV/A_ProductionOrderComponent_2?$filter=Material eq 'MAT-48219' and Plant eq '1010'",
+  );
+  const orders = new Set(components.map((c) => c.ManufacturingOrder));
+  const produced = await all(
+    "API_PRODUCTION_ORDER_2_SRV/A_ProductionOrder_2?$filter=Material eq 'VEH-SEDAN-L2'",
+  );
+
+  assert.deepEqual([...orders].sort(), produced.map((o) => o.ManufacturingOrder).sort());
+  for (const order of produced) {
+    const need = components.filter((c) => c.ManufacturingOrder === order.ManufacturingOrder);
+    assert.equal(Number(need[0].RequiredQuantity), Number(order.TotalQuantity), "one housing per car");
+  }
 });
 
 test("master data uses reserved example domains and fiction-reserved phone numbers only", async () => {

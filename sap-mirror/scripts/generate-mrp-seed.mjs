@@ -10,7 +10,7 @@ export const TOTAL = 214;
 
 // [material, PO, element date offset (days), rescheduling offset (days)] — all bring-forward.
 export const ACTIONABLE = [
-  ["MAT-48219", "4500001234", 0, -4],
+  ["MAT-48219", "4500001234", 0, -5],
   ["MAT-51002", "4500001240", 1, -4],
   ["MAT-33871", "4500001251", 2, -3],
   ["MAT-20114", "4500001262", 1, -5],
@@ -40,8 +40,8 @@ export function rows() {
   while (lines.length < TOTAL) {
     const index = lines.length;
     const outward = random() < 0.4;
-    // Within tolerance: in-shift 1-3 days, out-shift 1-15 days.
-    const shift = outward ? 1 + Math.floor(random() * 15) : -(1 + Math.floor(random() * 3));
+    // Within tolerance: in-shift 1-2 days, out-shift 1-15 days.
+    const shift = outward ? 1 + Math.floor(random() * 15) : -(1 + Math.floor(random() * 2));
     const material = `MAT-9${String(1000 + Math.floor(random() * 40)).padStart(4, "0")}`;
     const plant = random() < 0.7 ? "1010" : "1020";
     push(material, plant, String(4500002000 + index), outward ? 15 : 10, 2 + Math.floor(random() * 20), shift);

@@ -29,6 +29,7 @@ service API_SALES_ORDER_SRV {
 @requires: 'authenticated-user'
 service API_PRODUCTION_ORDER_2_SRV {
   @readonly entity A_ProductionOrder_2 as projection on s4.A_ProductionOrder_2;
+  @readonly entity A_ProductionOrderComponent_2 as projection on s4.A_ProductionOrderComponent_2;
 }
 
 @path: 'API_BUSINESS_PARTNER'

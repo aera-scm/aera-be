@@ -122,6 +122,21 @@ entity A_ProductionOrder_2 {
   ProductionUnit : String(3);
   TotalQuantity : Decimal(13, 3);
   OrderIsReleased : String(1);
+  to_ProductionOrderComponent : Composition of many A_ProductionOrderComponent_2 on to_ProductionOrderComponent.ManufacturingOrder = ManufacturingOrder;
+}
+
+// API_PRODUCTION_ORDER_2_SRV
+entity A_ProductionOrderComponent_2 {
+  key Reservation : String(10);
+  key ReservationItem : String(4);
+  Material : String(40);
+  Plant : String(4);
+  ManufacturingOrder : String(12);
+  MatlCompRequirementDate : Date;
+  MatlCompRequirementTime : Time;
+  BaseUnit : String(3);
+  RequiredQuantity : Decimal(13, 3);
+  WithdrawnQuantity : Decimal(13, 3);
 }
 
 // API_BUSINESS_PARTNER

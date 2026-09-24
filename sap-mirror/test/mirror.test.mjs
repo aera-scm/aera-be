@@ -59,7 +59,7 @@ describe("OData V2 contract (IR-02)", () => {
       API_PURCHASEORDER_PROCESS_SRV: ["A_PurchaseOrder", "A_PurchaseOrderItem", "A_PurchaseOrderScheduleLine"],
       API_MATERIAL_STOCK_SRV: ["A_MatlStkInAcctMod"],
       API_SALES_ORDER_SRV: ["A_SalesOrderItem", "A_SalesOrderScheduleLine"],
-      API_PRODUCTION_ORDER_2_SRV: ["A_ProductionOrder_2"],
+      API_PRODUCTION_ORDER_2_SRV: ["A_ProductionOrder_2", "A_ProductionOrderComponent_2"],
       API_BUSINESS_PARTNER: ["A_Supplier", "A_BusinessPartner", "A_AddressEmailAddress"],
       API_MATERIAL_DOCUMENT_SRV: ["A_MaterialDocumentItem"],
     };

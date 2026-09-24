@@ -5,35 +5,67 @@
       "package": "@sap/cloud-sdk-vdm-purchase-order-service",
       "entities": {
         "A_PurchaseOrder": [
-          "CompanyCode", "PurchaseOrderType", "PurchasingProcessingStatus", "CreationDate",
-          "LastChangeDateTime", "Supplier", "PurchasingOrganization", "PurchasingGroup",
-          "PurchaseOrderDate", "DocumentCurrency", "SupplyingPlant"
+          "CompanyCode",
+          "PurchaseOrderType",
+          "PurchasingProcessingStatus",
+          "CreationDate",
+          "LastChangeDateTime",
+          "Supplier",
+          "PurchasingOrganization",
+          "PurchasingGroup",
+          "PurchaseOrderDate",
+          "DocumentCurrency",
+          "SupplyingPlant"
         ],
         "A_PurchaseOrderItem": [
-          "PurchaseOrderItemText", "Plant", "StorageLocation", "OrderQuantity",
-          "PurchaseOrderQuantityUnit", "DocumentCurrency", "NetPriceAmount", "NetPriceQuantity",
-          "IsCompletelyDelivered", "PurchaseOrderItemCategory", "Material"
+          "PurchaseOrderItemText",
+          "Plant",
+          "StorageLocation",
+          "OrderQuantity",
+          "PurchaseOrderQuantityUnit",
+          "DocumentCurrency",
+          "NetPriceAmount",
+          "NetPriceQuantity",
+          "IsCompletelyDelivered",
+          "PurchaseOrderItemCategory",
+          "Material"
         ],
         "A_PurchaseOrderScheduleLine": [
-          "DelivDateCategory", "ScheduleLineDeliveryDate", "PurchaseOrderQuantityUnit",
-          "ScheduleLineOrderQuantity", "ScheduleLineDeliveryTime", "ScheduleLineCommittedQuantity"
+          "DelivDateCategory",
+          "ScheduleLineDeliveryDate",
+          "PurchaseOrderQuantityUnit",
+          "ScheduleLineOrderQuantity",
+          "ScheduleLineDeliveryTime",
+          "ScheduleLineCommittedQuantity"
         ]
       },
       "compositions": [
         {
-          "parent": "A_PurchaseOrder", "name": "to_PurchaseOrderItem", "child": "A_PurchaseOrderItem",
-          "on": { "PurchaseOrder": "PurchaseOrder" }
+          "parent": "A_PurchaseOrder",
+          "name": "to_PurchaseOrderItem",
+          "child": "A_PurchaseOrderItem",
+          "on": {
+            "PurchaseOrder": "PurchaseOrder"
+          }
         },
         {
-          "parent": "A_PurchaseOrderItem", "name": "to_ScheduleLine", "child": "A_PurchaseOrderScheduleLine",
-          "on": { "PurchasingDocument": "PurchaseOrder", "PurchasingDocumentItem": "PurchaseOrderItem" }
+          "parent": "A_PurchaseOrderItem",
+          "name": "to_ScheduleLine",
+          "child": "A_PurchaseOrderScheduleLine",
+          "on": {
+            "PurchasingDocument": "PurchaseOrder",
+            "PurchasingDocumentItem": "PurchaseOrderItem"
+          }
         }
       ]
     },
     "API_MATERIAL_STOCK_SRV": {
       "package": "@sap/cloud-sdk-vdm-material-stock-service",
       "entities": {
-        "A_MatlStkInAcctMod": ["MaterialBaseUnit", "MatlWrhsStkQtyInMatlBaseUnit"]
+        "A_MatlStkInAcctMod": [
+          "MaterialBaseUnit",
+          "MatlWrhsStkQtyInMatlBaseUnit"
+        ]
       },
       "compositions": []
     },
@@ -41,26 +73,48 @@
       "package": "@sap/cloud-sdk-vdm-sales-order-service",
       "entities": {
         "A_SalesOrder": [
-          "SalesOrderType", "SoldToParty", "CreationDate", "SalesOrderDate", "TotalNetAmount",
-          "TransactionCurrency", "RequestedDeliveryDate", "CustomerGroup"
+          "SalesOrderType",
+          "SoldToParty",
+          "CreationDate",
+          "SalesOrderDate",
+          "TotalNetAmount",
+          "TransactionCurrency",
+          "RequestedDeliveryDate",
+          "CustomerGroup"
         ],
         "A_SalesOrderItem": [
-          "SalesOrderItemText", "Material", "RequestedQuantity", "RequestedQuantityUnit",
-          "TransactionCurrency", "NetAmount", "ProductionPlant"
+          "SalesOrderItemText",
+          "Material",
+          "RequestedQuantity",
+          "RequestedQuantityUnit",
+          "TransactionCurrency",
+          "NetAmount",
+          "ProductionPlant"
         ],
         "A_SalesOrderScheduleLine": [
-          "RequestedDeliveryDate", "ConfirmedDeliveryDate", "OrderQuantityUnit",
+          "RequestedDeliveryDate",
+          "ConfirmedDeliveryDate",
+          "OrderQuantityUnit",
           "ScheduleLineOrderQuantity"
         ]
       },
       "compositions": [
         {
-          "parent": "A_SalesOrder", "name": "to_Item", "child": "A_SalesOrderItem",
-          "on": { "SalesOrder": "SalesOrder" }
+          "parent": "A_SalesOrder",
+          "name": "to_Item",
+          "child": "A_SalesOrderItem",
+          "on": {
+            "SalesOrder": "SalesOrder"
+          }
         },
         {
-          "parent": "A_SalesOrderItem", "name": "to_ScheduleLine", "child": "A_SalesOrderScheduleLine",
-          "on": { "SalesOrder": "SalesOrder", "SalesOrderItem": "SalesOrderItem" }
+          "parent": "A_SalesOrderItem",
+          "name": "to_ScheduleLine",
+          "child": "A_SalesOrderScheduleLine",
+          "on": {
+            "SalesOrder": "SalesOrder",
+            "SalesOrderItem": "SalesOrderItem"
+          }
         }
       ]
     },
@@ -68,26 +122,70 @@
       "package": "@sap/cloud-sdk-vdm-production-order-v2-service",
       "entities": {
         "A_ProductionOrder_2": [
-          "ManufacturingOrderType", "Material", "ProductionPlant", "MRPController",
-          "SalesOrder", "SalesOrderItem", "MfgOrderPlannedStartDate", "MfgOrderPlannedStartTime",
-          "MfgOrderPlannedEndDate", "MfgOrderPlannedEndTime", "ProductionUnit", "TotalQuantity",
+          "ManufacturingOrderType",
+          "Material",
+          "ProductionPlant",
+          "MRPController",
+          "SalesOrder",
+          "SalesOrderItem",
+          "MfgOrderPlannedStartDate",
+          "MfgOrderPlannedStartTime",
+          "MfgOrderPlannedEndDate",
+          "MfgOrderPlannedEndTime",
+          "ProductionUnit",
+          "TotalQuantity",
           "OrderIsReleased"
+        ],
+        "A_ProductionOrderComponent_2": [
+          "Material",
+          "Plant",
+          "ManufacturingOrder",
+          "MatlCompRequirementDate",
+          "MatlCompRequirementTime",
+          "BaseUnit",
+          "RequiredQuantity",
+          "WithdrawnQuantity"
         ]
       },
-      "compositions": []
+      "compositions": [
+        {
+          "parent": "A_ProductionOrder_2",
+          "name": "to_ProductionOrderComponent",
+          "child": "A_ProductionOrderComponent_2",
+          "on": {
+            "ManufacturingOrder": "ManufacturingOrder"
+          }
+        }
+      ]
     },
     "API_BUSINESS_PARTNER": {
       "package": "@sap/cloud-sdk-vdm-business-partner-service",
       "entities": {
         "A_BusinessPartner": [
-          "Supplier", "BusinessPartnerCategory", "BusinessPartnerFullName", "BusinessPartnerName"
+          "Supplier",
+          "BusinessPartnerCategory",
+          "BusinessPartnerFullName",
+          "BusinessPartnerName"
         ],
-        "A_Supplier": ["SupplierName", "SupplierFullName", "PurchasingIsBlocked"],
-        "A_BusinessPartnerAddress": ["CityName", "Country"],
-        "A_AddressEmailAddress": ["IsDefaultEmailAddress", "EmailAddress"],
+        "A_Supplier": [
+          "SupplierName",
+          "SupplierFullName",
+          "PurchasingIsBlocked"
+        ],
+        "A_BusinessPartnerAddress": [
+          "CityName",
+          "Country"
+        ],
+        "A_AddressEmailAddress": [
+          "IsDefaultEmailAddress",
+          "EmailAddress"
+        ],
         "A_AddressPhoneNumber": [
-          "DestinationLocationCountry", "IsDefaultPhoneNumber", "PhoneNumber",
-          "InternationalPhoneNumber", "PhoneNumberType"
+          "DestinationLocationCountry",
+          "IsDefaultPhoneNumber",
+          "PhoneNumber",
+          "InternationalPhoneNumber",
+          "PhoneNumberType"
         ]
       },
       "compositions": []
@@ -96,8 +194,15 @@
       "package": "@sap/cloud-sdk-vdm-material-document-service",
       "entities": {
         "A_MaterialDocumentItem": [
-          "Material", "Plant", "StorageLocation", "GoodsMovementType", "PurchaseOrder",
-          "PurchaseOrderItem", "MaterialBaseUnit", "QuantityInBaseUnit", "EntryUnit",
+          "Material",
+          "Plant",
+          "StorageLocation",
+          "GoodsMovementType",
+          "PurchaseOrder",
+          "PurchaseOrderItem",
+          "MaterialBaseUnit",
+          "QuantityInBaseUnit",
+          "EntryUnit",
           "QuantityInEntryUnit"
         ]
       },

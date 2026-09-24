@@ -184,3 +184,14 @@ test("business partner grouping tells suppliers from carriers for sender verific
     1000234: "SUPL", 1000871: "SUPL", 1000950: "CARR", 9000001: "INTL", 9000002: "INTL",
   });
 });
+
+test("FR-LRN-01 seeds twelve dated supplier schedules and fifteen posted goods receipts", async () => {
+  const orders = await all("API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder?$filter=Supplier eq '1000234'");
+  const historical = orders.filter((order) => /^45000030\d\d$/.test(order.PurchaseOrder));
+  const documents = await all("API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentItem?$filter=GoodsMovementType eq '101'");
+  const headers = await all("API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentHeader");
+  assert.equal(historical.length, 12);
+  assert.equal(documents.length, 15);
+  assert.equal(headers.length, 15);
+  assert.ok(headers.every((header) => time(header.PostingDate) < T0));
+});

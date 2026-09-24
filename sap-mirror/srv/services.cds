@@ -46,6 +46,7 @@ service API_BUSINESS_PARTNER {
 @path: 'API_MATERIAL_DOCUMENT_SRV'
 @requires: 'authenticated-user'
 service API_MATERIAL_DOCUMENT_SRV {
+  @readonly entity A_MaterialDocumentHeader as projection on s4.A_MaterialDocumentHeader;
   entity A_MaterialDocumentItem as projection on s4.A_MaterialDocumentItem;
 }
 

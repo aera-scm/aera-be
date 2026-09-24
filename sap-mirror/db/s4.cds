@@ -189,6 +189,13 @@ entity A_AddressPhoneNumber {
 }
 
 // API_MATERIAL_DOCUMENT_SRV
+entity A_MaterialDocumentHeader {
+  key MaterialDocumentYear : String(4);
+  key MaterialDocument : String(10);
+  PostingDate : Date;
+}
+
+// API_MATERIAL_DOCUMENT_SRV
 entity A_MaterialDocumentItem {
   key MaterialDocumentYear : String(4);
   key MaterialDocument : String(10);

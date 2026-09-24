@@ -196,6 +196,9 @@
     "API_MATERIAL_DOCUMENT_SRV": {
       "package": "@sap/cloud-sdk-vdm-material-document-service",
       "entities": {
+        "A_MaterialDocumentHeader": [
+          "PostingDate"
+        ],
         "A_MaterialDocumentItem": [
           "Material",
           "Plant",

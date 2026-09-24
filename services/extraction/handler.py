@@ -21,6 +21,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from services.extraction.multilingual import BedrockLocator, Word, verified_spans
 from services.gatekeeper.handler import Guardrail
 from services.rules.br_02 import MIN_CONFIDENCE, field_status
 from services.shared.audit import AuditWriter
@@ -57,6 +58,14 @@ class Reading:
 
 def textract_readings(client: Any, bucket: str, key: str) -> tuple[list[Reading], str]:
     """Query answers with confidence (0-1) and the page text of one document."""
+    readings, text, _ = textract_document(client, bucket, key)
+    return readings, text
+
+
+def textract_document(
+    client: Any, bucket: str, key: str
+) -> tuple[list[Reading], str, list[Word]]:
+    """Keep query answers and word confidence for language-specific extraction."""
     response = client.analyze_document(
         Document={"S3Object": {"Bucket": bucket, "Name": key}},
         FeatureTypes=["QUERIES"],
@@ -65,9 +74,12 @@ def textract_readings(client: Any, bucket: str, key: str) -> tuple[list[Reading]
     blocks = {block["Id"]: block for block in response.get("Blocks", [])}
     readings: list[Reading] = []
     lines: list[str] = []
+    words: list[Word] = []
     for block in blocks.values():
         if block["BlockType"] == "LINE" and block.get("Text"):
             lines.append(str(block["Text"]))
+        if block["BlockType"] == "WORD" and block.get("Text"):
+            words.append(Word(str(block["Text"]), float(block.get("Confidence", 0)) / 100))
         if block["BlockType"] != "QUERY":
             continue
         alias = block.get("Query", {}).get("Alias")
@@ -83,7 +95,7 @@ def textract_readings(client: Any, bucket: str, key: str) -> tuple[list[Reading]
             readings.append(
                 Reading(str(alias), str(best["Text"]).strip(), float(best["Confidence"]) / 100)
             )
-    return readings, "\n".join(lines)
+    return readings, "\n".join(lines), words
 
 
 def text_readings(text: str) -> list[Reading]:
@@ -143,6 +155,7 @@ class Extraction:
     audit: AuditWriter
     bus: Any
     min_confidence: Callable[[], float] = lambda: MIN_CONFIDENCE
+    locator: Callable[[str, str], dict[str, str]] | None = None
     env: str | None = None
 
     def handle(self, signal_id: str) -> Signal | None:
@@ -152,13 +165,11 @@ class Extraction:
         readings = text_readings(signal.normalized_text or "")
         if signal.channel is SignalChannel.CARRIER:
             readings += carrier_readings(signal.normalized_text or "")
-        ocr_text: list[str] = []
+        documents: list[tuple[list[Reading], str, list[Word]]] = []
         for key in signal.attachments:
             if key.lower().endswith(DOCUMENT_SUFFIXES):
-                found, text = textract_readings(self.textract, self.bucket, key)
-                readings += found
-                ocr_text.append(text)
-        scanned = "\n".join(t for t in ocr_text if t)
+                documents.append(textract_document(self.textract, self.bucket, key))
+        scanned = "\n".join(text for _, text, _ in documents if text)
         if scanned:
             scan = self.guardrail.scan(scanned)
             if scan.blocked:
@@ -172,6 +183,15 @@ class Extraction:
                     guardrail="BLOCKED",
                     env=self.env,
                 )
+        language = self._language("\n".join([signal.normalized_text or "", scanned]))
+        for queries, text, words in documents:
+            if language == "en":
+                readings += queries
+            elif language in {"id", "de"} and self.locator is not None:
+                readings += [
+                    Reading(field.name, field.value, field.confidence)
+                    for field in verified_spans(self.locator(text, language), words, text)
+                ]
         po = signal.po_number or next((r.value for r in readings if r.name == "PO_NUMBER"), None)
         material = signal.material or next(
             (r.value for r in readings if r.name == "MATERIAL"), None
@@ -200,7 +220,6 @@ class Extraction:
             )
             for index, reading in enumerate(readings, start=1)
         ]
-        language = self._language("\n".join([signal.normalized_text or "", scanned]))
         extracted = signal.model_copy(
             update={
                 "fields": fields,
@@ -267,6 +286,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             audit=AuditWriter(dynamodb),
             bus=runtime.client("events"),
             min_confidence=lambda: float(config.decimal("CRITICAL_FIELD_MIN_CONF")),
+            locator=lambda text, language: BedrockLocator(
+                runtime.client("bedrock-runtime"), runtime.parameter("MODEL_SMALL_ID")
+            )(text, language),
         )
     signal = _extraction.handle(str(event["detail"]["data"]["signalId"]))
     return {"status": None if signal is None else signal.status.value}

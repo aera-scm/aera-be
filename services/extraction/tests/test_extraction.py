@@ -6,6 +6,7 @@ import pytest
 
 from services.conftest import RAW_BUCKET, RecordingBus
 from services.extraction.handler import Extraction, text_readings, textract_readings
+from services.extraction.multilingual import BedrockLocator, Word, verified_spans
 from services.gatekeeper.handler import Guardrail
 from services.shared.audit import AuditWriter
 from services.shared.intake import Attachment, Inbound, Intake
@@ -46,8 +47,11 @@ class FakeTextract:
 
 
 class FakeComprehend:
+    def __init__(self, language: str = "en") -> None:
+        self.language = language
+
     def detect_dominant_language(self, Text: str) -> dict[str, Any]:
-        return {"Languages": [{"LanguageCode": "en", "Score": 0.98}]}
+        return {"Languages": [{"LanguageCode": self.language, "Score": 0.98}]}
 
 
 class PassingBedrock:
@@ -93,17 +97,19 @@ def accepted(dynamodb: Any, s3: Any, bus: RecordingBus) -> Any:
 
 
 def extraction(
-    dynamodb: Any, bus: RecordingBus, sap: SapClient, textract: FakeTextract
+    dynamodb: Any, bus: RecordingBus, sap: SapClient, textract: FakeTextract,
+    *, language: str = "en", locator: Any = None,
 ) -> Extraction:
     return Extraction(
         signals=SignalStore(dynamodb, ENV),
         textract=textract,
-        comprehend=FakeComprehend(),
+        comprehend=FakeComprehend(language),
         bucket=RAW_BUCKET,
         sap=sap,
         guardrail=Guardrail(PassingBedrock(), lambda: "g", lambda: "1"),
         audit=AuditWriter(dynamodb, ENV),
         bus=bus,
+        locator=locator,
         env=ENV,
     )
 
@@ -210,3 +216,48 @@ def test_carrier_events_carry_eta_tracking_and_status_as_fields() -> None:
         ("TRACKING_NUMBER", "NFL-SEA-448120"),
         ("CARRIER_STATUS", "DELAYED"),
     ]
+
+
+@pytest.mark.parametrize("language", ["de", "id"])
+def test_fr_lng_01_non_english_ocr_requires_verbatim_words_and_lowest_confidence(
+    dynamodb: Any, bus: RecordingBus, sap: SapClient, accepted: Any, language: str
+) -> None:
+    response = query_blocks({"QUANTITY": ("999", 99.0)}, ["PO 4500001234", "Menge 640 Stueck"])
+    response["Blocks"] += [
+        {"Id": "w1", "BlockType": "WORD", "Text": "640", "Confidence": 71.0},
+        {"Id": "w2", "BlockType": "WORD", "Text": "Stueck", "Confidence": 83.0},
+    ]
+    service = extraction(
+        dynamodb, bus, sap, FakeTextract(response), language=language,
+        locator=lambda text, lang: {"QUANTITY": "640 Stueck", "PRICE": "999"},
+    )
+
+    result = service.handle(accepted(po="4500001234"))
+
+    assert result is not None and result.language == language
+    assert [(f.name, f.value, f.confidence) for f in result.fields] == [
+        ("QUANTITY", "640 Stueck", 0.71)
+    ]
+    assert result.fields[0].status is FieldStatus.UNCONFIRMED
+
+
+def test_fr_lng_01_rejects_model_values_absent_from_textract() -> None:
+    assert verified_spans(
+        {"QUANTITY": "600", "PRICE": "20", "PO_NUMBER": "4500001234"},
+        [Word("4500001234", 0.96), Word("640", 0.71)],
+        "PO 4500001234, quantity 640",
+    ) == [
+        # Only the literal PO survives; model-only numbers are discarded.
+        verified_spans(
+            {"PO_NUMBER": "4500001234"}, [Word("4500001234", 0.96)], "PO 4500001234"
+        )[0]
+    ]
+
+
+def test_fr_lng_01_locator_accepts_json_only() -> None:
+    class Model:
+        def converse(self, **request: Any) -> dict[str, Any]:
+            assert request["modelId"] == "small"
+            return {"output": {"message": {"content": [{"text": '{"QUANTITY":"640"}'}]}}}
+
+    assert BedrockLocator(Model(), "small")("Menge 640", "de") == {"QUANTITY": "640"}

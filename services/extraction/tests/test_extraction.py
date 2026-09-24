@@ -72,19 +72,25 @@ PHOTO = query_blocks(
 
 @pytest.fixture
 def accepted(dynamodb: Any, s3: Any, bus: RecordingBus) -> Any:
-    def make(text: str = "Only this much ready", po: str | None = None) -> str:
+    def make(
+        text: str = "Only this much ready", po: str | None = None,
+        *, channel: SignalChannel = SignalChannel.WHATSAPP,
+    ) -> str:
         intake = Intake(
             dynamodb=dynamodb, raw=RawStore(s3, RAW_BUCKET), bus=bus, component="t", env=ENV
         )
         signal = intake.receive(
             Inbound(
-                channel=SignalChannel.WHATSAPP,
-                sender_id="+447700900234",
+                channel=channel,
+                sender_id=("orders@krieger-guss.example" if channel is SignalChannel.EMAIL
+                           else "+447700900234"),
                 body=b"{}",
                 content_type="application/json",
                 normalized_text=text,
                 po_number=po,
-                attachments=(Attachment("image.jpg", b"jpeg", "image/jpeg"),),
+                attachments=((Attachment("document.pdf", b"%PDF-synthetic", "application/pdf"),)
+                             if channel is SignalChannel.EMAIL
+                             else (Attachment("image.jpg", b"jpeg", "image/jpeg"),)),
             )
         )
         store = SignalStore(dynamodb, ENV)
@@ -218,27 +224,33 @@ def test_carrier_events_carry_eta_tracking_and_status_as_fields() -> None:
     ]
 
 
-@pytest.mark.parametrize("language", ["de", "id"])
-def test_fr_lng_01_non_english_ocr_requires_verbatim_words_and_lowest_confidence(
-    dynamodb: Any, bus: RecordingBus, sap: SapClient, accepted: Any, language: str
+@pytest.mark.parametrize("language,unit,channel", [
+    ("de", "Stueck", SignalChannel.EMAIL),
+    ("id", "unit", SignalChannel.WHATSAPP),
+])
+def test_fr_lng_01_german_pdf_and_indonesian_whatsapp_photo_use_grounded_words(
+    dynamodb: Any, bus: RecordingBus, sap: SapClient, accepted: Any,
+    language: str, unit: str, channel: SignalChannel,
 ) -> None:
-    response = query_blocks({"QUANTITY": ("999", 99.0)}, ["PO 4500001234", "Menge 640 Stueck"])
+    phrase = f"640 {unit}"
+    text = f"PO 4500001234, {('Menge' if language == 'de' else 'jumlah')} {phrase}"
+    response = query_blocks({"QUANTITY": ("999", 99.0)}, [text])
     response["Blocks"] += [
         {"Id": "w1", "BlockType": "WORD", "Text": "640", "Confidence": 71.0},
-        {"Id": "w2", "BlockType": "WORD", "Text": "Stueck", "Confidence": 83.0},
+        {"Id": "w2", "BlockType": "WORD", "Text": unit, "Confidence": 83.0},
     ]
     service = extraction(
         dynamodb, bus, sap, FakeTextract(response), language=language,
-        locator=lambda text, lang: {"QUANTITY": "640 Stueck", "PRICE": "999"},
+        locator=lambda text, lang: {"QUANTITY": phrase, "PRICE": "999"},
     )
 
-    result = service.handle(accepted(po="4500001234"))
+    result = service.handle(accepted(text=text, po="4500001234", channel=channel))
 
     assert result is not None and result.language == language
-    assert [(f.name, f.value, f.confidence) for f in result.fields] == [
-        ("QUANTITY", "640 Stueck", 0.71)
+    assert [(f.name, f.value, f.confidence) for f in result.fields if f.name == "QUANTITY"] == [
+        ("QUANTITY", phrase, 0.71)
     ]
-    assert result.fields[0].status is FieldStatus.UNCONFIRMED
+    assert next(f for f in result.fields if f.name == "QUANTITY").status is FieldStatus.UNCONFIRMED
 
 
 def test_fr_lng_01_rejects_model_values_absent_from_textract() -> None:

@@ -45,17 +45,22 @@ class ReliabilityJob:
             profile = compute(supplier_id, material, history, observed)
             self.dynamodb.put_item(
                 TableName=table_name("analytics", self.env),
-                Item=to_item({
-                    "PK": f"SUPPLIER#{supplier_id}", "SK": f"MATERIAL#{material}",
-                    "supplierId": supplier_id, "material": material,
-                    "windowDays": profile.window_days, "sampleSize": profile.sample_size,
-                    "onTimeRate": profile.on_time_rate,
-                    "meanDelayDays": profile.mean_delay_days,
-                    "p90DelayDays": profile.p90_delay_days,
-                    "partialRate": profile.partial_rate,
-                    "computedAt": profile.computed_at,
-                    "sourceRefs": profile.source_refs,
-                }),
+                Item=to_item(
+                    {
+                        "PK": f"SUPPLIER#{supplier_id}",
+                        "SK": f"MATERIAL#{material}",
+                        "supplierId": supplier_id,
+                        "material": material,
+                        "windowDays": profile.window_days,
+                        "sampleSize": profile.sample_size,
+                        "onTimeRate": profile.on_time_rate,
+                        "meanDelayDays": profile.mean_delay_days,
+                        "p90DelayDays": profile.p90_delay_days,
+                        "partialRate": profile.partial_rate,
+                        "computedAt": profile.computed_at,
+                        "sourceRefs": profile.source_refs,
+                    }
+                ),
             )
             count += 1
         return count
@@ -66,7 +71,8 @@ def read_profile(
 ) -> dict[str, Any] | None:
     item = dynamodb.get_item(
         TableName=table_name("analytics", env),
-        Key=key(supplier_id, material), ConsistentRead=True,
+        Key=key(supplier_id, material),
+        ConsistentRead=True,
     ).get("Item")
     if item is None:
         return None

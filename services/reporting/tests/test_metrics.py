@@ -11,29 +11,63 @@ from services.shared.models import Case, CaseStatus, Figure
 NOW = datetime(2026, 10, 5, 8, tzinfo=UTC)
 
 
-def stored_case(client: Any, number: int, status: CaseStatus, tier: Literal[1, 2, 3],
-                revenue: int, minutes: int, *, sourced: bool = True) -> None:
+def stored_case(
+    client: Any,
+    number: int,
+    status: CaseStatus,
+    tier: Literal[1, 2, 3],
+    revenue: int,
+    minutes: int,
+    *,
+    sourced: bool = True,
+) -> None:
     case = Case(
-        case_id=f"EXC-2026-{number:04d}", type="MRP_EXCEPTION", material="MAT-48219",
-        plant="1010", status=status, tier=tier, rar_usd=Decimal(revenue),
-        figures=[Figure(name="rar:SO-1/10", value=Decimal(revenue), unit="USD",
-                        source_ref="SAP:API_SALES_ORDER_SRV/A_SalesOrder/NetAmount")]
-        if sourced else [],
-        created_at=NOW, updated_at=NOW + timedelta(minutes=minutes),
+        case_id=f"EXC-2026-{number:04d}",
+        type="MRP_EXCEPTION",
+        material="MAT-48219",
+        plant="1010",
+        status=status,
+        tier=tier,
+        rar_usd=Decimal(revenue),
+        figures=[
+            Figure(
+                name="rar:SO-1/10",
+                value=Decimal(revenue),
+                unit="USD",
+                source_ref="SAP:API_SALES_ORDER_SRV/A_SalesOrder/NetAmount",
+            )
+        ]
+        if sourced
+        else [],
+        created_at=NOW,
+        updated_at=NOW + timedelta(minutes=minutes),
     )
-    client.put_item(TableName="aera-test-cases", Item=to_item({
-        "PK": f"CASE#{case.case_id}", "SK": "META",
-        **case.model_dump(mode="python", by_alias=True),
-    }))
+    client.put_item(
+        TableName="aera-test-cases",
+        Item=to_item(
+            {
+                "PK": f"CASE#{case.case_id}",
+                "SK": "META",
+                **case.model_dump(mode="python", by_alias=True),
+            }
+        ),
+    )
 
 
 def test_fr_rpt_02_measured_kpis_keep_basis_sources_and_missing_costs(dynamodb: Any) -> None:
     stored_case(dynamodb, 914, CaseStatus.CLOSED, 1, 100, 30)
     stored_case(dynamodb, 915, CaseStatus.CLOSED, 2, 200, 60)
     stored_case(dynamodb, 916, CaseStatus.ESCALATED, 3, 999, 10)
-    dynamodb.put_item(TableName="aera-test-signals", Item=to_item({
-        "PK": "SIG#one", "SK": "META", "status": "QUARANTINED",
-    }))
+    dynamodb.put_item(
+        TableName="aera-test-signals",
+        Item=to_item(
+            {
+                "PK": "SIG#one",
+                "SK": "META",
+                "status": "QUARANTINED",
+            }
+        ),
+    )
 
     values = kpis(dynamodb, "test")
 
@@ -49,8 +83,16 @@ def test_fr_rpt_02_measured_kpis_keep_basis_sources_and_missing_costs(dynamodb: 
     assert values["blockedSignals"]["value"] == 1
     assert values["costPerCase"]["value"] is None
     assert values["optimiserSavings"]["value"] is None
-    for key in ("caseCount", "revenueProtected", "resolutionMedian", "resolutionP95",
-                "touchlessRate", "approvalsRequested", "approvalsAvoided", "blockedSignals"):
+    for key in (
+        "caseCount",
+        "revenueProtected",
+        "resolutionMedian",
+        "resolutionP95",
+        "touchlessRate",
+        "approvalsRequested",
+        "approvalsAvoided",
+        "blockedSignals",
+    ):
         assert values[key]["sourceRef"] and values[key]["sampleSize"] >= 0
 
 

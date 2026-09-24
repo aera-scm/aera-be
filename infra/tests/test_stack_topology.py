@@ -70,10 +70,10 @@ def test_nfr_mnt_02_all_stacks_and_dependencies() -> None:
             "web",
             "gate",
             "edge",
-                "reasoning",
-                "control",
-                "interop",
-            }:
+            "reasoning",
+            "control",
+            "interop",
+        }:
             resources = list(artifact.template["Resources"].values())
             assert len(resources) == 1
             assert resources[0]["Type"] == "AWS::CloudFormation::WaitConditionHandle"

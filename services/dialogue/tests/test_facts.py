@@ -20,9 +20,15 @@ def test_fr_neg_02_loads_master_recipient_and_german_language(
     cases = CaseStore(dynamodb, "test")
     cases.create(
         Case(
-            case_id="EXC-2026-0914", type="SUPPLIER_DELAY", material="MAT-48219",
-            plant="1010", po_number="4500001234", po_item="10",
-            status=CaseStatus.INVESTIGATING, created_at=NOW, updated_at=NOW,
+            case_id="EXC-2026-0914",
+            type="SUPPLIER_DELAY",
+            material="MAT-48219",
+            plant="1010",
+            po_number="4500001234",
+            po_item="10",
+            status=CaseStatus.INVESTIGATING,
+            created_at=NOW,
+            updated_at=NOW,
         ),
         actor="system",
     )
@@ -40,9 +46,14 @@ def test_fr_neg_02_refuses_non_investigating_case(dynamodb: Any, sap: SapClient)
     cases = CaseStore(dynamodb, "test")
     cases.create(
         Case(
-            case_id="EXC-2026-0915", type="SUPPLIER_DELAY", material="MAT-48219",
-            plant="1010", po_number="4500001234", status=CaseStatus.RECEIVED,
-            created_at=NOW, updated_at=NOW,
+            case_id="EXC-2026-0915",
+            type="SUPPLIER_DELAY",
+            material="MAT-48219",
+            plant="1010",
+            po_number="4500001234",
+            status=CaseStatus.RECEIVED,
+            created_at=NOW,
+            updated_at=NOW,
         ),
         actor="system",
     )

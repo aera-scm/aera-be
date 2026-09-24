@@ -14,7 +14,10 @@ DUE = date(2026, 9, 20)
 def line(n: int, days_late: int, *, parts: int = 1) -> Schedule:
     receipt_qty = Decimal(100) / parts
     return Schedule(
-        "1000234", "MAT-A", DUE, Decimal(100),
+        "1000234",
+        "MAT-A",
+        DUE,
+        Decimal(100),
         tuple(
             Receipt(DUE + timedelta(days=days_late), receipt_qty, f"SAP:RECEIPT/{n}-{p}")
             for p in range(parts)
@@ -38,8 +41,12 @@ def test_fr_lrn_01_computes_rates_and_nearest_rank_p90() -> None:
 
 def test_fr_lrn_01_incomplete_receipt_is_censored_and_partial() -> None:
     incomplete = Schedule(
-        "1000234", "MAT-A", DUE, Decimal(100),
-        (Receipt(DUE, Decimal(50), "SAP:RECEIPT/1"),), "SAP:SCHEDULE/1",
+        "1000234",
+        "MAT-A",
+        DUE,
+        Decimal(100),
+        (Receipt(DUE, Decimal(50), "SAP:RECEIPT/1"),),
+        "SAP:SCHEDULE/1",
     )
 
     profile = compute("1000234", "MAT-A", [incomplete], NOW)

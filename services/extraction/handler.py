@@ -62,9 +62,7 @@ def textract_readings(client: Any, bucket: str, key: str) -> tuple[list[Reading]
     return readings, text
 
 
-def textract_document(
-    client: Any, bucket: str, key: str
-) -> tuple[list[Reading], str, list[Word]]:
+def textract_document(client: Any, bucket: str, key: str) -> tuple[list[Reading], str, list[Word]]:
     """Keep query answers and word confidence for language-specific extraction."""
     response = client.analyze_document(
         Document={"S3Object": {"Bucket": bucket, "Name": key}},

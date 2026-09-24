@@ -34,21 +34,37 @@ class Ses:
 def prepared(dynamodb: Any, sap: SapClient, bus: RecordingBus) -> tuple[str, str]:
     CaseStore(dynamodb, "test").create(
         Case(
-            case_id=CASE, type="SUPPLIER_DELAY", material="MAT-48219", plant="1010",
-            po_number="4500001234", po_item="10", status=CaseStatus.INVESTIGATING,
-            stockout_at=NOW + timedelta(hours=6), created_at=NOW, updated_at=NOW,
-        ), actor="system",
+            case_id=CASE,
+            type="SUPPLIER_DELAY",
+            material="MAT-48219",
+            plant="1010",
+            po_number="4500001234",
+            po_item="10",
+            status=CaseStatus.INVESTIGATING,
+            stockout_at=NOW + timedelta(hours=6),
+            created_at=NOW,
+            updated_at=NOW,
+        ),
+        actor="system",
     )
     ctx = ToolContext(sap=sap, dynamodb=dynamodb, bus=bus, clock=lambda: NOW, env="test")
-    result = BY_NAME["request_supplier_info"].invoke(ctx, {
-        "caseId": CASE, "templateId": "CONFIRM_PARTIAL_QTY",
-        "fields": {"poNumber": "4500001234"},
-    })
+    result = BY_NAME["request_supplier_info"].invoke(
+        ctx,
+        {
+            "caseId": CASE,
+            "templateId": "CONFIRM_PARTIAL_QTY",
+            "fields": {"poNumber": "4500001234"},
+        },
+    )
     message_id = str(result["messageId"])
     service = Notifier(
-        dynamodb=dynamodb, sap=sap, ses=Ses(),
+        dynamodb=dynamodb,
+        sap=sap,
+        ses=Ses(),
         standins=lambda: {"orders@krieger-guss.example": "team@example.test"},
-        sender=lambda: "aera@example.test", clock=lambda: NOW, env="test",
+        sender=lambda: "aera@example.test",
+        clock=lambda: NOW,
+        env="test",
     )
     assert service.handle_dialogue({"caseId": CASE, "messageId": message_id})[0]["status"] == "SENT"
     item = dynamodb.get_item(
@@ -59,19 +75,31 @@ def prepared(dynamodb: Any, sap: SapClient, bus: RecordingBus) -> tuple[str, str
 
 
 def reply(
-    dynamodb: Any, token: str, *, supplier: str = "1000234",
+    dynamodb: Any,
+    token: str,
+    *,
+    supplier: str = "1000234",
     status: SignalStatus = SignalStatus.ACCEPTED,
     received_at: datetime = NOW + timedelta(hours=1),
 ) -> str:
     signal_id = new_ulid()
-    SignalStore(dynamodb, "test").create(Signal(
-        signal_id=signal_id, channel=SignalChannel.EMAIL,
-        sender_id="orders@krieger-guss.example", sender_verified=True,
-        supplier_id=supplier, received_at=received_at,
-        raw_s3_key=f"raw/{signal_id}", raw_sha256="0" * 64,
-        normalized_text=f"Reference: {token}. Available quantity: 640.",
-        po_number="4500001234", material="MAT-48219", case_id=CASE, status=status,
-    ))
+    SignalStore(dynamodb, "test").create(
+        Signal(
+            signal_id=signal_id,
+            channel=SignalChannel.EMAIL,
+            sender_id="orders@krieger-guss.example",
+            sender_verified=True,
+            supplier_id=supplier,
+            received_at=received_at,
+            raw_s3_key=f"raw/{signal_id}",
+            raw_sha256="0" * 64,
+            normalized_text=f"Reference: {token}. Available quantity: 640.",
+            po_number="4500001234",
+            material="MAT-48219",
+            case_id=CASE,
+            status=status,
+        )
+    )
     return signal_id
 
 
@@ -88,14 +116,15 @@ def test_at_20_german_question_reply_resumes_case(
         TableName="aera-test-cases",
         KeyConditionExpression="PK = :case AND begins_with(SK, :prefix)",
         ExpressionAttributeValues={
-            ":case": {"S": f"CASE#{CASE}"}, ":prefix": {"S": "OUTBOX#SUPPLIER_REPLY#"},
+            ":case": {"S": f"CASE#{CASE}"},
+            ":prefix": {"S": "OUTBOX#SUPPLIER_REPLY#"},
         },
     )["Items"]
     assert len(outbox) == 2
     assert not bus.details("CaseReadyForRun")
-    OutboxRelay(dynamodb, bus, "test").relay({"Records": [
-        {"eventName": "INSERT", "dynamodb": {"NewImage": item}} for item in outbox
-    ]})
+    OutboxRelay(dynamodb, bus, "test").relay(
+        {"Records": [{"eventName": "INSERT", "dynamodb": {"NewImage": item}} for item in outbox]}
+    )
     assert bus.details("CaseReadyForRun")[-1]["data"]["signalId"] == signal_id
     assert not ReplyMatcher(dynamodb, bus, "test").match(signal_id)
     item = dynamodb.get_item(

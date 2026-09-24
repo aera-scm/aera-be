@@ -15,18 +15,24 @@ def main() -> None:
         language = "de" if number % 2 else "id"
         quantity = 600 + number * 10
         case = deepcopy(base)
-        case.update({
-            "id": f"ml-{number:02d}", "category": "MULTILINGUAL", "subsets": ["ml"],
-            "description": (
-                f"{'German PDF' if language == 'de' else 'Indonesian WhatsApp photo'}: "
-                f"{quantity} units read at 71% and kept unconfirmed."
-            ),
-            "multilingualLanguage": language, "multilingualQuantity": quantity,
-            "signals": ["eval-multilingual"],
-        })
+        case.update(
+            {
+                "id": f"ml-{number:02d}",
+                "category": "MULTILINGUAL",
+                "subsets": ["ml"],
+                "description": (
+                    f"{'German PDF' if language == 'de' else 'Indonesian WhatsApp photo'}: "
+                    f"{quantity} units read at 71% and kept unconfirmed."
+                ),
+                "multilingualLanguage": language,
+                "multilingualQuantity": quantity,
+                "signals": ["eval-multilingual"],
+            }
+        )
         case["plan"] = {
             "options": [o for o in base["plan"]["options"] if o["id"] in {"B", "C"}],
-            "chosen": ["C"], "rationale": "SAP-backed donor transfer",
+            "chosen": ["C"],
+            "rationale": "SAP-backed donor transfer",
         }
         case["truth"] = {
             "accepted": ["eval-multilingual"],
@@ -35,7 +41,9 @@ def main() -> None:
                 "QUANTITY": f"{quantity} {'Stueck' if language == 'de' else 'unit'}:UNCONFIRMED",
             },
             "optionCosts": {"B": 51900, "C": 4100},
-            "blocked": {"B": ["V-06"]}, "tier": 1, "status": "AUTO_APPROVED",
+            "blocked": {"B": ["V-06"]},
+            "tier": 1,
+            "status": "AUTO_APPROVED",
             "acceptable": [["STO"]],
         }
         (CASES / f"ml-{number:02d}.json").write_text(

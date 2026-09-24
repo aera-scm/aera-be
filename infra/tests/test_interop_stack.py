@@ -59,9 +59,7 @@ def test_fr_int_agentcore_runtimes_require_scoped_oauth_client() -> None:
 def test_fr_lab_02_channel_replay_requires_recorded_media_and_scoped_secrets() -> None:
     with pytest.raises(ValueError, match="recorded-media"):
         build_app(
-            DataSettings(
-                env_name="dev", owner="synthetic-owner", lab_delivery="channel-replay"
-            )
+            DataSettings(env_name="dev", owner="synthetic-owner", lab_delivery="channel-replay")
         )
     app = build_app(
         DataSettings(

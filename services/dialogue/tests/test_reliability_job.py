@@ -9,9 +9,7 @@ from services.shared.sap_client import SapClient
 NOW = datetime(2026, 10, 5, 8, tzinfo=UTC)
 
 
-def test_fr_lrn_01_refreshes_profiles_from_mirror_only(
-    dynamodb: Any, sap: SapClient
-) -> None:
+def test_fr_lrn_01_refreshes_profiles_from_mirror_only(dynamodb: Any, sap: SapClient) -> None:
     count = ReliabilityJob(sap, dynamodb, "test").refresh(NOW)
 
     assert count >= 1

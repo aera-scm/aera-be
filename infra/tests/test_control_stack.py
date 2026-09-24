@@ -91,12 +91,14 @@ def test_fr_lrn_01_reliability_refresh_is_scheduled_daily(
 ) -> None:
     control = templates["control"]
     rules = control.find_resources("AWS::Events::Rule")
-    [rule] = [r for r in rules.values()
-              if r["Properties"]["Name"] == "aera-dev-reliability-refresh"]
+    [rule] = [
+        r for r in rules.values() if r["Properties"]["Name"] == "aera-dev-reliability-refresh"
+    ]
     assert rule["Properties"]["ScheduleExpression"] == "rate(1 day)"
     functions = control.find_resources("AWS::Lambda::Function")
-    assert any(f["Properties"]["FunctionName"] == "aera-dev-reliability"
-               for f in functions.values())
+    assert any(
+        f["Properties"]["FunctionName"] == "aera-dev-reliability" for f in functions.values()
+    )
 
 
 def test_fr_ver_04_reasoning_policy_guardrail_and_verifier_wiring(
@@ -106,13 +108,10 @@ def test_fr_ver_04_reasoning_policy_guardrail_and_verifier_wiring(
     policies = control.find_resources("AWS::Bedrock::AutomatedReasoningPolicy")
     [policy] = policies.values()
     rules = policy["Properties"]["PolicyDefinition"]["Rules"]
-    assert {rule["Id"] for rule in rules} == {
-        "BR05AUTO0001", "BR07DONOR001", "BR12RAR00001"
-    }
+    assert {rule["Id"] for rule in rules} == {"BR05AUTO0001", "BR07DONOR001", "BR12RAR00001"}
     assert "total_cost_cents < rar_protected_cents" in rules[2]["Expression"]
     guardrails = control.find_resources("AWS::Bedrock::Guardrail")
-    assert any("AutomatedReasoningPolicyConfig" in row["Properties"]
-               for row in guardrails.values())
+    assert any("AutomatedReasoningPolicyConfig" in row["Properties"] for row in guardrails.values())
     params = control.find_resources("AWS::SSM::Parameter")
     assert {row["Properties"]["Name"] for row in params.values()} >= {
         "/aera/dev/REASONING_POLICY_ARN",
@@ -185,9 +184,9 @@ def test_notifier_and_monitor_listen_on_the_bus(
     assert rules["aera-dev-notifier"] == ["NotificationRequested"]
     assert rules["aera-dev-supplierdialogue"] == ["SupplierInfoRequested"]
     assert rules["aera-dev-monitor"] == ["GoodsReceiptDue"]
-    sweep = templates["control"].find_resources("AWS::Events::Rule", {
-        "Properties": {"Name": "aera-dev-dialogue-sweep"}
-    })
+    sweep = templates["control"].find_resources(
+        "AWS::Events::Rule", {"Properties": {"Name": "aera-dev-dialogue-sweep"}}
+    )
     assert len(sweep) == 1
 
 

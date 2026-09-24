@@ -156,12 +156,16 @@ class VerifierService:
                 TableName=self._table,
                 Key=to_item({"PK": f"CASE#{case_id}", "SK": f"PLAN#{plan_version}"}),
                 UpdateExpression="SET automatedReasoning = :assessment",
-                ExpressionAttributeValues=to_item({":assessment": {
-                    "status": assessment.status,
-                    "statements": assessment.statements,
-                    "findings": assessment.findings,
-                    "policyArn": assessment.policy_arn,
-                }}),
+                ExpressionAttributeValues=to_item(
+                    {
+                        ":assessment": {
+                            "status": assessment.status,
+                            "statements": assessment.statements,
+                            "findings": assessment.findings,
+                            "policyArn": assessment.policy_arn,
+                        }
+                    }
+                ),
             )
             if result.tier != 3 and assessment.disagrees:
                 result = Route(3, result.version_hash, reason="AUTOMATED_REASONING_DISAGREEMENT")
@@ -175,7 +179,10 @@ class VerifierService:
         }
 
     def _record(
-        self, case_id: str, version: int, verification: Verification,
+        self,
+        case_id: str,
+        version: int,
+        verification: Verification,
         projection: dict[str, Any],
     ) -> None:
         record = verification.record

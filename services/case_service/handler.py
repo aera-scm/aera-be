@@ -182,8 +182,11 @@ class CaseService:
         emit(
             self.bus,
             "CaseUpdated",
-            {**self._summary(case, triage, case.status), "reason": reason,
-             **({"signalId": signal_id} if signal_id else {})},
+            {
+                **self._summary(case, triage, case.status),
+                "reason": reason,
+                **({"signalId": signal_id} if signal_id else {}),
+            },
             component=COMPONENT,
             case_id=case.case_id,
             environment=self.env,

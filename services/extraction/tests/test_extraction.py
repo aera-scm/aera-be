@@ -73,8 +73,10 @@ PHOTO = query_blocks(
 @pytest.fixture
 def accepted(dynamodb: Any, s3: Any, bus: RecordingBus) -> Any:
     def make(
-        text: str = "Only this much ready", po: str | None = None,
-        *, channel: SignalChannel = SignalChannel.WHATSAPP,
+        text: str = "Only this much ready",
+        po: str | None = None,
+        *,
+        channel: SignalChannel = SignalChannel.WHATSAPP,
     ) -> str:
         intake = Intake(
             dynamodb=dynamodb, raw=RawStore(s3, RAW_BUCKET), bus=bus, component="t", env=ENV
@@ -82,15 +84,20 @@ def accepted(dynamodb: Any, s3: Any, bus: RecordingBus) -> Any:
         signal = intake.receive(
             Inbound(
                 channel=channel,
-                sender_id=("orders@krieger-guss.example" if channel is SignalChannel.EMAIL
-                           else "+447700900234"),
+                sender_id=(
+                    "orders@krieger-guss.example"
+                    if channel is SignalChannel.EMAIL
+                    else "+447700900234"
+                ),
                 body=b"{}",
                 content_type="application/json",
                 normalized_text=text,
                 po_number=po,
-                attachments=((Attachment("document.pdf", b"%PDF-synthetic", "application/pdf"),)
-                             if channel is SignalChannel.EMAIL
-                             else (Attachment("image.jpg", b"jpeg", "image/jpeg"),)),
+                attachments=(
+                    (Attachment("document.pdf", b"%PDF-synthetic", "application/pdf"),)
+                    if channel is SignalChannel.EMAIL
+                    else (Attachment("image.jpg", b"jpeg", "image/jpeg"),)
+                ),
             )
         )
         store = SignalStore(dynamodb, ENV)
@@ -103,8 +110,13 @@ def accepted(dynamodb: Any, s3: Any, bus: RecordingBus) -> Any:
 
 
 def extraction(
-    dynamodb: Any, bus: RecordingBus, sap: SapClient, textract: FakeTextract,
-    *, language: str = "en", locator: Any = None,
+    dynamodb: Any,
+    bus: RecordingBus,
+    sap: SapClient,
+    textract: FakeTextract,
+    *,
+    language: str = "en",
+    locator: Any = None,
 ) -> Extraction:
     return Extraction(
         signals=SignalStore(dynamodb, ENV),
@@ -224,13 +236,21 @@ def test_carrier_events_carry_eta_tracking_and_status_as_fields() -> None:
     ]
 
 
-@pytest.mark.parametrize("language,unit,channel", [
-    ("de", "Stueck", SignalChannel.EMAIL),
-    ("id", "unit", SignalChannel.WHATSAPP),
-])
+@pytest.mark.parametrize(
+    "language,unit,channel",
+    [
+        ("de", "Stueck", SignalChannel.EMAIL),
+        ("id", "unit", SignalChannel.WHATSAPP),
+    ],
+)
 def test_fr_lng_01_german_pdf_and_indonesian_whatsapp_photo_use_grounded_words(
-    dynamodb: Any, bus: RecordingBus, sap: SapClient, accepted: Any,
-    language: str, unit: str, channel: SignalChannel,
+    dynamodb: Any,
+    bus: RecordingBus,
+    sap: SapClient,
+    accepted: Any,
+    language: str,
+    unit: str,
+    channel: SignalChannel,
 ) -> None:
     phrase = f"640 {unit}"
     text = f"PO 4500001234, {('Menge' if language == 'de' else 'jumlah')} {phrase}"
@@ -240,7 +260,11 @@ def test_fr_lng_01_german_pdf_and_indonesian_whatsapp_photo_use_grounded_words(
         {"Id": "w2", "BlockType": "WORD", "Text": unit, "Confidence": 83.0},
     ]
     service = extraction(
-        dynamodb, bus, sap, FakeTextract(response), language=language,
+        dynamodb,
+        bus,
+        sap,
+        FakeTextract(response),
+        language=language,
         locator=lambda text, lang: {"QUANTITY": phrase, "PRICE": "999"},
     )
 
@@ -260,9 +284,7 @@ def test_fr_lng_01_rejects_model_values_absent_from_textract() -> None:
         "PO 4500001234, quantity 640",
     ) == [
         # Only the literal PO survives; model-only numbers are discarded.
-        verified_spans(
-            {"PO_NUMBER": "4500001234"}, [Word("4500001234", 0.96)], "PO 4500001234"
-        )[0]
+        verified_spans({"PO_NUMBER": "4500001234"}, [Word("4500001234", 0.96)], "PO 4500001234")[0]
     ]
 
 

@@ -97,9 +97,9 @@ class Notifier:
     def handle_dialogue(self, data: dict[str, Any]) -> list[dict[str, str]]:
         case_id, message_id = str(data["caseId"]), str(data["messageId"])
         key = {"PK": {"S": f"CASE#{case_id}"}, "SK": {"S": f"MSG#{message_id}"}}
-        item = self.dynamodb.get_item(
-            TableName=self._dialogue, Key=key, ConsistentRead=True
-        ).get("Item")
+        item = self.dynamodb.get_item(TableName=self._dialogue, Key=key, ConsistentRead=True).get(
+            "Item"
+        )
         if item is None:
             return []
         draft = from_item(item)
@@ -107,22 +107,29 @@ class Notifier:
             return [{"status": "DUPLICATE"}]
         try:
             facts = load_facts(
-                self.cases, self.sap, case_id, expected_status=CaseStatus.WAITING_SUPPLIER,
+                self.cases,
+                self.sap,
+                case_id,
+                expected_status=CaseStatus.WAITING_SUPPLIER,
                 signals=self.signals,
             )
             expected = render_question(
-                facts, str(draft["poNumber"]), Template(str(draft["templateId"])),
+                facts,
+                str(draft["poNumber"]),
+                Template(str(draft["templateId"])),
                 str(draft["referenceToken"]),
             )
-            if any((
-                draft.get("supplierId") != expected.supplier_id,
-                draft.get("recipient") != expected.recipient,
-                draft.get("channel", "EMAIL") != expected.channel,
-                draft.get("language") != expected.language.value,
-                draft.get("renderedText") != expected.rendered_text,
-                draft.get("englishCopy") != expected.english_copy,
-                draft.get("sourceRef") != expected.source_ref,
-            )):
+            if any(
+                (
+                    draft.get("supplierId") != expected.supplier_id,
+                    draft.get("recipient") != expected.recipient,
+                    draft.get("channel", "EMAIL") != expected.channel,
+                    draft.get("language") != expected.language.value,
+                    draft.get("renderedText") != expected.rendered_text,
+                    draft.get("englishCopy") != expected.english_copy,
+                    draft.get("sourceRef") != expected.source_ref,
+                )
+            ):
                 raise ValueError("V-14: draft no longer matches SAP master and template")
         except (KeyError, ValueError):
             self._block_dialogue(key, "V-14 or master-data check failed")
@@ -134,8 +141,11 @@ class Notifier:
             return [{"status": "BLOCKED"}]
         try:
             schedule = start(
-                case_id, facts.supplier_id, expected.reference_token,
-                self.clock(), case.stockout_at,
+                case_id,
+                facts.supplier_id,
+                expected.reference_token,
+                self.clock(),
+                case.stockout_at,
                 timeout=timedelta(hours=float(self.config.decimal("SUPPLIER_REPLY_TIMEOUT_HOURS"))),
             )
         except ValueError:
@@ -143,18 +153,24 @@ class Notifier:
             return [{"status": "BLOCKED"}]
         standin = self.standins().get(recipient) if expected.channel == "EMAIL" else None
         sender = self.sender() if expected.channel == "EMAIL" else None
-        if (expected.channel == "EMAIL" and (not standin or not sender or self.ses is None)
-                or expected.channel == "WHATSAPP" and self.whatsapp is None):
+        if (
+            expected.channel == "EMAIL"
+            and (not standin or not sender or self.ses is None)
+            or expected.channel == "WHATSAPP"
+            and self.whatsapp is None
+        ):
             self._block_dialogue(key, "no verified delivery stand-in")
             return [{"status": "BLOCKED"}]
         try:
             self.dynamodb.update_item(
-                TableName=self._dialogue, Key=key,
+                TableName=self._dialogue,
+                Key=key,
                 UpdateExpression="SET sendClaim = :claim",
                 ConditionExpression="#s = :draft AND attribute_not_exists(sendClaim)",
                 ExpressionAttributeNames={"#s": "status"},
                 ExpressionAttributeValues={
-                    ":draft": {"S": "DRAFT"}, ":claim": {"S": self.clock().isoformat()},
+                    ":draft": {"S": "DRAFT"},
+                    ":claim": {"S": self.clock().isoformat()},
                 },
             )
         except self.dynamodb.exceptions.ConditionalCheckFailedException:
@@ -174,34 +190,46 @@ class Notifier:
                 )
         except Exception:  # noqa: BLE001 - ambiguous SES failure must not trigger a duplicate send
             self.dynamodb.update_item(
-                TableName=self._dialogue, Key=key,
+                TableName=self._dialogue,
+                Key=key,
                 UpdateExpression="SET #s = :blocked, blockReason = :reason",
                 ConditionExpression="#s = :draft AND attribute_exists(sendClaim)",
                 ExpressionAttributeNames={"#s": "status"},
                 ExpressionAttributeValues={
-                    ":draft": {"S": "DRAFT"}, ":blocked": {"S": "BLOCKED"},
+                    ":draft": {"S": "DRAFT"},
+                    ":blocked": {"S": "BLOCKED"},
                     ":reason": {"S": "SES send result unavailable"},
                 },
             )
             self._ensure_dialogue_escalated(case_id, message_id, "supplier send unavailable")
             return [{"status": "BLOCKED"}]
         self.dynamodb.update_item(
-            TableName=self._dialogue, Key=key,
+            TableName=self._dialogue,
+            Key=key,
             UpdateExpression=(
                 "SET #s = :sent, sentAt = :now, remindAt = :remind, "
                 "deadline = :deadline, reminderSent = :no"
             ),
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
-                ":sent": {"S": "SENT"}, ":now": {"S": schedule.sent_at.isoformat()},
+                ":sent": {"S": "SENT"},
+                ":now": {"S": schedule.sent_at.isoformat()},
                 ":remind": {"S": schedule.remind_at.isoformat()},
-                ":deadline": {"S": schedule.deadline.isoformat()}, ":no": {"BOOL": False},
+                ":deadline": {"S": schedule.deadline.isoformat()},
+                ":no": {"BOOL": False},
             },
         )
         self.audit.record(
-            f"CASE#{case_id}", "SUPPLIER_QUESTION_SENT", actor="system", case_id=case_id,
-            payload={"messageId": message_id, "templateId": expected.template.value,
-                     "recipient": recipient, "sourceRef": expected.source_ref},
+            f"CASE#{case_id}",
+            "SUPPLIER_QUESTION_SENT",
+            actor="system",
+            case_id=case_id,
+            payload={
+                "messageId": message_id,
+                "templateId": expected.template.value,
+                "recipient": recipient,
+                "sourceRef": expected.source_ref,
+            },
         )
         return [{"recipient": recipient, "status": "SENT"}]
 
@@ -218,8 +246,10 @@ class Notifier:
                 ),
                 "ExpressionAttributeNames": {"#s": "status"},
                 "ExpressionAttributeValues": {
-                    ":sent": {"S": "SENT"}, ":blocked": {"S": "BLOCKED"},
-                    ":timedout": {"S": "TIMED_OUT"}, ":draft": {"S": "DRAFT"},
+                    ":sent": {"S": "SENT"},
+                    ":blocked": {"S": "BLOCKED"},
+                    ":timedout": {"S": "TIMED_OUT"},
+                    ":draft": {"S": "DRAFT"},
                 },
             }
             if cursor is not None:
@@ -244,12 +274,14 @@ class Notifier:
                 return {"status": "UNCHANGED"}
             try:
                 self.dynamodb.update_item(
-                    TableName=self._dialogue, Key=key,
+                    TableName=self._dialogue,
+                    Key=key,
                     UpdateExpression="SET #s = :blocked, blockReason = :reason",
                     ConditionExpression="#s = :draft AND sendClaim = :claim",
                     ExpressionAttributeNames={"#s": "status"},
                     ExpressionAttributeValues={
-                        ":draft": {"S": "DRAFT"}, ":blocked": {"S": "BLOCKED"},
+                        ":draft": {"S": "DRAFT"},
+                        ":blocked": {"S": "BLOCKED"},
                         ":claim": {"S": str(record["sendClaim"])},
                         ":reason": {"S": "SES send outcome unavailable"},
                     },
@@ -268,11 +300,14 @@ class Notifier:
         if record.get("status") != "SENT":
             return {"status": "UNCHANGED"}
         thread = Thread(
-            case_id, str(record["supplierId"]), str(record["referenceToken"]),
+            case_id,
+            str(record["supplierId"]),
+            str(record["referenceToken"]),
             datetime.fromisoformat(str(record["sentAt"])),
             datetime.fromisoformat(str(record["remindAt"])),
             datetime.fromisoformat(str(record["deadline"])),
-            DialogueStatus.WAITING, bool(record.get("reminderSent")),
+            DialogueStatus.WAITING,
+            bool(record.get("reminderSent")),
         )
         _, action = tick(thread, self.clock())
         if action is TimeoutAction.NONE:
@@ -280,12 +315,14 @@ class Notifier:
         if action is TimeoutAction.ESCALATE:
             try:
                 self.dynamodb.update_item(
-                    TableName=self._dialogue, Key=key,
+                    TableName=self._dialogue,
+                    Key=key,
                     UpdateExpression="SET #s = :timedout",
                     ConditionExpression="#s = :sent",
                     ExpressionAttributeNames={"#s": "status"},
                     ExpressionAttributeValues={
-                        ":sent": {"S": "SENT"}, ":timedout": {"S": "TIMED_OUT"},
+                        ":sent": {"S": "SENT"},
+                        ":timedout": {"S": "TIMED_OUT"},
                     },
                 )
             except self.dynamodb.exceptions.ConditionalCheckFailedException:
@@ -294,12 +331,14 @@ class Notifier:
             return {"status": "ESCALATED" if done else "UNCHANGED"}
         try:
             self.dynamodb.update_item(
-                TableName=self._dialogue, Key=key,
+                TableName=self._dialogue,
+                Key=key,
                 UpdateExpression="SET reminderSent = :yes",
                 ConditionExpression="#s = :sent AND reminderSent = :no",
                 ExpressionAttributeNames={"#s": "status"},
                 ExpressionAttributeValues={
-                    ":sent": {"S": "SENT"}, ":no": {"BOOL": False},
+                    ":sent": {"S": "SENT"},
+                    ":no": {"BOOL": False},
                     ":yes": {"BOOL": True},
                 },
             )
@@ -307,11 +346,16 @@ class Notifier:
             return {"status": "UNCHANGED"}
         try:
             facts = load_facts(
-                self.cases, self.sap, case_id, expected_status=CaseStatus.WAITING_SUPPLIER,
+                self.cases,
+                self.sap,
+                case_id,
+                expected_status=CaseStatus.WAITING_SUPPLIER,
                 selected_channel=str(record.get("channel") or "EMAIL"),  # type: ignore[arg-type]
             )
             question = render_question(
-                facts, str(record["poNumber"]), Template(str(record["templateId"])),
+                facts,
+                str(record["poNumber"]),
+                Template(str(record["templateId"])),
                 str(record["referenceToken"]),
             )
             standin = (
@@ -327,7 +371,8 @@ class Notifier:
                 if not standin or not self.sender() or self.ses is None:
                     return {"status": "BLOCKED"}
                 self.ses.send_email(
-                    Source=self.sender(), Destination={"ToAddresses": [standin]},
+                    Source=self.sender(),
+                    Destination={"ToAddresses": [standin]},
                     Message={
                         "Subject": {"Data": f"{case_id}: PO {question.po_number} clarification"},
                         "Body": {"Text": {"Data": question.rendered_text}},
@@ -338,19 +383,24 @@ class Notifier:
         except Exception:  # noqa: BLE001 - claim prevents duplicate reminder on ambiguous failure
             return {"status": "BLOCKED"}
         self.audit.record(
-            f"CASE#{case_id}", "SUPPLIER_REMINDER_SENT", actor="system", case_id=case_id,
+            f"CASE#{case_id}",
+            "SUPPLIER_REMINDER_SENT",
+            actor="system",
+            case_id=case_id,
             payload={"messageId": message_id, "recipient": question.recipient},
         )
         return {"status": "REMINDED"}
 
     def _block_dialogue(self, key: dict[str, Any], reason: str) -> None:
         self.dynamodb.update_item(
-            TableName=self._dialogue, Key=key,
+            TableName=self._dialogue,
+            Key=key,
             UpdateExpression="SET #s = :blocked, blockReason = :reason",
             ConditionExpression="#s = :draft AND attribute_not_exists(sendClaim)",
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
-                ":draft": {"S": "DRAFT"}, ":blocked": {"S": "BLOCKED"},
+                ":draft": {"S": "DRAFT"},
+                ":blocked": {"S": "BLOCKED"},
                 ":reason": {"S": reason},
             },
         )
@@ -365,7 +415,10 @@ class Notifier:
         try:
             if case.status is CaseStatus.WAITING_SUPPLIER:
                 self.cases.transition(
-                    case_id, CaseStatus.INVESTIGATING, actor="system", reason=reason,
+                    case_id,
+                    CaseStatus.INVESTIGATING,
+                    actor="system",
+                    reason=reason,
                     expected=CaseStatus.WAITING_SUPPLIER,
                 )
                 case = self.cases.get(case_id)
@@ -377,7 +430,10 @@ class Notifier:
                     ExpressionAttributeValues={":three": {"N": "3"}},
                 )
                 self.cases.transition(
-                    case_id, CaseStatus.ESCALATED, actor="system", reason=reason,
+                    case_id,
+                    CaseStatus.ESCALATED,
+                    actor="system",
+                    reason=reason,
                     expected=CaseStatus.INVESTIGATING,
                 )
                 case = self.cases.get(case_id)
@@ -564,9 +620,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             ses=runtime.client("ses"),
             standins=standins,
             sender=sender,
-            whatsapp=WhatsAppTemplateSender(
-                config=lambda: runtime.secret("channels/whatsapp")
-            ),
+            whatsapp=WhatsAppTemplateSender(config=lambda: runtime.secret("channels/whatsapp")),
         )
     data = dict((event.get("detail") or {}).get("data") or {})
     if event.get("task") == "dialogueSweep":

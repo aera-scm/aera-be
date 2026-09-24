@@ -14,14 +14,20 @@ DOCUMENTS = "API_MATERIAL_DOCUMENT_SRV"
 
 
 def load_history(
-    sap: SapClient, supplier_id: str, material: str, now: datetime,
-    *, window_days: int = 180,
+    sap: SapClient,
+    supplier_id: str,
+    material: str,
+    now: datetime,
+    *,
+    window_days: int = 180,
 ) -> list[Schedule]:
     if not supplier_id or not material or now.tzinfo is None or window_days <= 0:
         raise ValueError("supplier history needs supplier, material and aware time")
     first = now.date() - timedelta(days=window_days)
     orders = sap.query(
-        PO, "A_PurchaseOrder", filter=f"Supplier eq {odata_quote(supplier_id)}",
+        PO,
+        "A_PurchaseOrder",
+        filter=f"Supplier eq {odata_quote(supplier_id)}",
         expand="to_PurchaseOrderItem/to_ScheduleLine",
     )
     history: list[Schedule] = []
@@ -40,7 +46,8 @@ def load_history(
             if not lines:
                 continue
             documents = sap.query(
-                DOCUMENTS, "A_MaterialDocumentItem",
+                DOCUMENTS,
+                "A_MaterialDocumentItem",
                 filter=(
                     f"PurchaseOrder eq {odata_quote(po_number)} and "
                     f"PurchaseOrderItem eq {odata_quote(item_number)} and "
@@ -50,7 +57,8 @@ def load_history(
             receipts: list[Receipt] = []
             for document in documents:
                 header = sap.get(
-                    DOCUMENTS, "A_MaterialDocumentHeader",
+                    DOCUMENTS,
+                    "A_MaterialDocumentHeader",
                     {
                         "MaterialDocumentYear": str(document.data["MaterialDocumentYear"]),
                         "MaterialDocument": str(document.data["MaterialDocument"]),
@@ -60,11 +68,14 @@ def load_history(
                 if posted is None:
                     raise ValueError("SAP receipt has no posting date")
                 if posted <= now.date():
-                    receipts.append(Receipt(
-                        posted, number(document.data.get("QuantityInBaseUnit")),
-                        f"{document.source_ref}/QuantityInBaseUnit + "
-                        f"{header.source_ref}/PostingDate",
-                    ))
+                    receipts.append(
+                        Receipt(
+                            posted,
+                            number(document.data.get("QuantityInBaseUnit")),
+                            f"{document.source_ref}/QuantityInBaseUnit + "
+                            f"{header.source_ref}/PostingDate",
+                        )
+                    )
             available = sorted(receipts, key=lambda r: (r.posted_on, r.source_ref))
             for due, line in sorted(
                 lines, key=lambda pair: (pair[0], str(pair[1]["ScheduleLine"]))
@@ -79,13 +90,19 @@ def load_history(
                         assigned.append(Receipt(receipt.posted_on, take, receipt.source_ref))
                         remaining -= take
                     if receipt.quantity > take:
-                        rest.append(Receipt(
-                            receipt.posted_on, receipt.quantity - take, receipt.source_ref
-                        ))
+                        rest.append(
+                            Receipt(receipt.posted_on, receipt.quantity - take, receipt.source_ref)
+                        )
                 available = rest
-                history.append(Schedule(
-                    supplier_id, material, due, required, tuple(assigned),
-                    f"{order.source_ref}/to_PurchaseOrderItem({item_number})/"
-                    f"to_ScheduleLine({line['ScheduleLine']})/ScheduleLineOrderQuantity",
-                ))
+                history.append(
+                    Schedule(
+                        supplier_id,
+                        material,
+                        due,
+                        required,
+                        tuple(assigned),
+                        f"{order.source_ref}/to_PurchaseOrderItem({item_number})/"
+                        f"to_ScheduleLine({line['ScheduleLine']})/ScheduleLineOrderQuantity",
+                    )
+                )
     return history

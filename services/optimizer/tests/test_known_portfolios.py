@@ -47,9 +47,14 @@ def test_br_20_known_portfolio_optimum(scenario: tuple[object, ...]) -> None:
     ]
     actions = [
         Candidate(
-            f"{name}-{i}", f"action-{i}",
+            f"{name}-{i}",
+            f"action-{i}",
             NOW + timedelta(hours=9 if i in late else 5),
-            100, 0, cost, (resource,), "ratecard:TEST",
+            100,
+            0,
+            cost,
+            (resource,),
+            "ratecard:TEST",
         )
         for i, cost in enumerate(costs)
     ]

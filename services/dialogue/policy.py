@@ -80,11 +80,7 @@ def _valid_token(value: str) -> bool:
 
 
 def _render(template: Template, language: Language, po: str, token: str) -> str:
-    return (
-        _TEXT[template][language].format(po=po)
-        + "\n"
-        + _REFERENCE[language].format(token=token)
-    )
+    return _TEXT[template][language].format(po=po) + "\n" + _REFERENCE[language].format(token=token)
 
 
 def render_question(

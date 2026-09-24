@@ -34,10 +34,14 @@ def test_the_ci_subset_has_25_cases_across_the_categories() -> None:
 def test_srd_8_3_full_case_inventory_matches_category_targets() -> None:
     cases = load_cases()
     assert Counter(case.category for case in cases) == {
-        "LATE_PO_CLEAR": 25, "LATE_PO_CONFLICT": 10,
-        "MATERIAL_SHORTAGE": 25, "CARRIER_DELAY": 15,
-        "LOW_CONFIDENCE": 15, "MULTILINGUAL": 15,
-        "ADVERSARIAL": 30, "NO_VIABLE_OPTION": 15,
+        "LATE_PO_CLEAR": 25,
+        "LATE_PO_CONFLICT": 10,
+        "MATERIAL_SHORTAGE": 25,
+        "CARRIER_DELAY": 15,
+        "LOW_CONFIDENCE": 15,
+        "MULTILINGUAL": 15,
+        "ADVERSARIAL": 30,
+        "NO_VIABLE_OPTION": 15,
     }
     assert len(load_cases("extended")) == 110
 

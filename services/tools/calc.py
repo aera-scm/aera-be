@@ -344,12 +344,22 @@ def compute_option(
             delay_days = int(profile["p90DelayDays"])
             arrival += timedelta(days=delay_days)
             source_ref = str(profile["sourceRefs"][0])
-            figures.extend([
-                {"name": "supplierP90DelayDays", "value": delay_days,
-                 "unit": "days", "sourceRef": source_ref},
-                {"name": "supplierSampleSize", "value": profile["sampleSize"],
-                 "unit": "schedule lines", "sourceRef": source_ref},
-            ])
+            figures.extend(
+                [
+                    {
+                        "name": "supplierP90DelayDays",
+                        "value": delay_days,
+                        "unit": "days",
+                        "sourceRef": source_ref,
+                    },
+                    {
+                        "name": "supplierSampleSize",
+                        "value": profile["sampleSize"],
+                        "unit": "schedule lines",
+                        "sourceRef": source_ref,
+                    },
+                ]
+            )
         actions = [
             {
                 "type": "CREATE_PO_ALTERNATE",

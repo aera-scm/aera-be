@@ -179,14 +179,22 @@ def request_supplier_info(
         ConditionExpression="attribute_not_exists(PK)",
     )
     ctx.cases.transition(
-        case_id, CaseStatus.WAITING_SUPPLIER, actor="agent", reason="supplier fact question",
-        expected=CaseStatus.INVESTIGATING, run_id=ctx.run_id,
+        case_id,
+        CaseStatus.WAITING_SUPPLIER,
+        actor="agent",
+        reason="supplier fact question",
+        expected=CaseStatus.INVESTIGATING,
+        run_id=ctx.run_id,
     )
     emit(
-        ctx.bus, "SupplierInfoRequested",
+        ctx.bus,
+        "SupplierInfoRequested",
         {"caseId": case_id, "messageId": message_id},
-        component=COMPONENT, case_id=case_id, run_id=ctx.run_id,
-        actor="agent", environment=ctx.env,
+        component=COMPONENT,
+        case_id=case_id,
+        run_id=ctx.run_id,
+        actor="agent",
+        environment=ctx.env,
     )
     return {"status": "WAITING_SUPPLIER", "messageId": message_id}
 

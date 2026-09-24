@@ -14,17 +14,18 @@ def profile_for(ctx: ToolContext, supplier_id: str, material: str) -> dict[str, 
     if profile is None:
         return None
     computed = datetime.fromisoformat(str(profile["computedAt"]))
-    if (computed.tzinfo is None or ctx.now() - computed > timedelta(hours=48)
-            or computed > ctx.now() + timedelta(minutes=5)):
+    if (
+        computed.tzinfo is None
+        or ctx.now() - computed > timedelta(hours=48)
+        or computed > ctx.now() + timedelta(minutes=5)
+    ):
         return None
     if profile["sampleSize"] <= 0 or not profile.get("sourceRefs"):
         return None
     return profile
 
 
-def get_supplier_reliability(
-    ctx: ToolContext, supplier_id: str, material: str
-) -> dict[str, Any]:
+def get_supplier_reliability(ctx: ToolContext, supplier_id: str, material: str) -> dict[str, Any]:
     if not supplier_id or not material:
         raise ToolError("supplierId and material are required")
     profile = profile_for(ctx, supplier_id, material)

@@ -39,30 +39,41 @@ class WhatsAppTemplateSender:
         name, language_code = str(entry.get("name") or ""), str(entry.get("languageCode") or "")
         body = str(entry.get("body") or "")
         if (
-            not phone_id.isdigit() or not _VERSION.fullmatch(version)
-            or not _NAME.fullmatch(name) or not _LANGUAGE.fullmatch(language_code)
+            not phone_id.isdigit()
+            or not _VERSION.fullmatch(version)
+            or not _NAME.fullmatch(name)
+            or not _LANGUAGE.fullmatch(language_code)
             or language_code.split("_")[0] != question.language.value.lower()
-            or body.count("{po}") != 1 or body.count("{token}") != 1
+            or body.count("{po}") != 1
+            or body.count("{token}") != 1
             or re.search(r"[{}]", body.replace("{po}", "").replace("{token}", ""))
             or body.format(po=question.po_number, token=question.reference_token)
             != question.rendered_text
         ):
             raise WhatsAppDeliveryError("approved WhatsApp template does not match V-14 text")
         payload = {
-            "messaging_product": "whatsapp", "to": destination.removeprefix("+"),
+            "messaging_product": "whatsapp",
+            "to": destination.removeprefix("+"),
             "type": "template",
             "template": {
-                "name": name, "language": {"code": language_code},
-                "components": [{"type": "body", "parameters": [
-                    {"type": "text", "text": question.po_number},
-                    {"type": "text", "text": question.reference_token},
-                ]}],
+                "name": name,
+                "language": {"code": language_code},
+                "components": [
+                    {
+                        "type": "body",
+                        "parameters": [
+                            {"type": "text", "text": question.po_number},
+                            {"type": "text", "text": question.reference_token},
+                        ],
+                    }
+                ],
             },
         }
         try:
             response = self.http.post(
                 f"https://graph.facebook.com/{version}/{phone_id}/messages",
-                headers={"Authorization": f"Bearer {token}"}, json=payload,
+                headers={"Authorization": f"Bearer {token}"},
+                json=payload,
             )
             response.raise_for_status()
             message_id = str(response.json()["messages"][0]["id"])

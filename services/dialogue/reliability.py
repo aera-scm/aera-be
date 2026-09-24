@@ -51,7 +51,8 @@ def compute(
         raise ValueError("reliability requires supplier, material and an aware observation time")
     first_day = computed_at.date() - timedelta(days=window_days)
     selected = [
-        line for line in schedules
+        line
+        for line in schedules
         if line.supplier_id == supplier_id
         and line.material == material
         and first_day <= line.due_on <= computed_at.date()
@@ -87,10 +88,14 @@ def compute(
         raise ValueError("no SAP schedule lines in reliability window")
     delays.sort()
     return Reliability(
-        supplier_id, material, window_days, count,
+        supplier_id,
+        material,
+        window_days,
+        count,
         Decimal(on_time) / count,
         Decimal(sum(delays)) / count,
         delays[ceil(count * 0.9) - 1],
         Decimal(partial) / count,
-        computed_at, tuple(sorted(refs)),
+        computed_at,
+        tuple(sorted(refs)),
     )

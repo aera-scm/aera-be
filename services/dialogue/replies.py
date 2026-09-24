@@ -30,8 +30,11 @@ class ReplyMatcher:
     def match(self, signal_id: str) -> bool:
         signal = self.signals.get(signal_id)
         if (
-            signal is None or signal.status is not SignalStatus.ACCEPTED
-            or not signal.sender_verified or not signal.case_id or not signal.supplier_id
+            signal is None
+            or signal.status is not SignalStatus.ACCEPTED
+            or not signal.sender_verified
+            or not signal.case_id
+            or not signal.supplier_id
         ):
             return False
         case = self.cases.get(signal.case_id)
@@ -52,47 +55,80 @@ class ReplyMatcher:
             if message.get("caseId") != signal.case_id or message.get("status") != "SENT":
                 continue
             thread = Thread(
-                signal.case_id, str(message["supplierId"]), token,
+                signal.case_id,
+                str(message["supplierId"]),
+                token,
                 datetime.fromisoformat(str(message["sentAt"])),
                 datetime.fromisoformat(str(message["remindAt"])),
                 datetime.fromisoformat(str(message["deadline"])),
-                DialogueStatus.WAITING, bool(message.get("reminderSent")),
+                DialogueStatus.WAITING,
+                bool(message.get("reminderSent")),
             )
             try:
                 accept_reply(
-                    thread, token=token, supplier_id=signal.supplier_id,
-                    signal_id=signal_id, gated=True, now=signal.received_at,
+                    thread,
+                    token=token,
+                    supplier_id=signal.supplier_id,
+                    signal_id=signal_id,
+                    gated=True,
+                    now=signal.received_at,
                 )
                 outbox = table_name("cases", self.env)
                 events = (
-                    ("SupplierReplyMatched", {"caseId": signal.case_id,
-                                              "signalId": signal_id,
-                                              "messageId": message["messageId"]}),
-                    ("CaseReadyForRun", {"caseId": signal.case_id,
-                                         "reason": "supplier reply", "signalId": signal_id}),
-                )
-                self.dynamodb.transact_write_items(TransactItems=[
-                    {"Update": {
-                        "TableName": self.table, "Key": {"PK": raw["PK"], "SK": raw["SK"]},
-                        "UpdateExpression": "SET #s = :replied, replySignalId = :signal",
-                        "ConditionExpression": "#s = :sent AND supplierId = :supplier",
-                        "ExpressionAttributeNames": {"#s": "status"},
-                        "ExpressionAttributeValues": {
-                            ":sent": {"S": "SENT"}, ":replied": {"S": "REPLIED"},
-                            ":signal": {"S": signal_id},
-                            ":supplier": {"S": signal.supplier_id},
+                    (
+                        "SupplierReplyMatched",
+                        {
+                            "caseId": signal.case_id,
+                            "signalId": signal_id,
+                            "messageId": message["messageId"],
                         },
-                    }},
-                    *[ {"Put": {
-                        "TableName": outbox,
-                        "Item": to_item({
-                            "PK": f"CASE#{signal.case_id}",
-                            "SK": f"OUTBOX#SUPPLIER_REPLY#{signal_id}#{kind}",
-                            "eventType": kind, "data": data, "sent": False,
-                        }),
-                        "ConditionExpression": "attribute_not_exists(PK)",
-                    }} for kind, data in events],
-                ])
+                    ),
+                    (
+                        "CaseReadyForRun",
+                        {
+                            "caseId": signal.case_id,
+                            "reason": "supplier reply",
+                            "signalId": signal_id,
+                        },
+                    ),
+                )
+                self.dynamodb.transact_write_items(
+                    TransactItems=[
+                        {
+                            "Update": {
+                                "TableName": self.table,
+                                "Key": {"PK": raw["PK"], "SK": raw["SK"]},
+                                "UpdateExpression": "SET #s = :replied, replySignalId = :signal",
+                                "ConditionExpression": "#s = :sent AND supplierId = :supplier",
+                                "ExpressionAttributeNames": {"#s": "status"},
+                                "ExpressionAttributeValues": {
+                                    ":sent": {"S": "SENT"},
+                                    ":replied": {"S": "REPLIED"},
+                                    ":signal": {"S": signal_id},
+                                    ":supplier": {"S": signal.supplier_id},
+                                },
+                            }
+                        },
+                        *[
+                            {
+                                "Put": {
+                                    "TableName": outbox,
+                                    "Item": to_item(
+                                        {
+                                            "PK": f"CASE#{signal.case_id}",
+                                            "SK": f"OUTBOX#SUPPLIER_REPLY#{signal_id}#{kind}",
+                                            "eventType": kind,
+                                            "data": data,
+                                            "sent": False,
+                                        }
+                                    ),
+                                    "ConditionExpression": "attribute_not_exists(PK)",
+                                }
+                            }
+                            for kind, data in events
+                        ],
+                    ]
+                )
             except (ValueError, self.dynamodb.exceptions.TransactionCanceledException):
                 continue
             return True

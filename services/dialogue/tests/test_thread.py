@@ -18,7 +18,10 @@ NOW = datetime(2026, 10, 5, 8, tzinfo=UTC)
 
 def thread(stockout_hours: int = 6) -> Thread:
     return start(
-        "EXC-2026-0914", "1000234", "AERA20260914ABCDEF", NOW,
+        "EXC-2026-0914",
+        "1000234",
+        "AERA20260914ABCDEF",
+        NOW,
         NOW + timedelta(hours=stockout_hours),
     )
 
@@ -53,12 +56,20 @@ def test_at_21_only_gated_reply_from_matching_supplier_resumes() -> None:
     ):
         with pytest.raises(ValueError, match="open gated thread"):
             accept_reply(
-                initial, token=token, supplier_id=supplier,
-                signal_id="SIG-1", gated=gated, now=received_at,
+                initial,
+                token=token,
+                supplier_id=supplier,
+                signal_id="SIG-1",
+                gated=gated,
+                now=received_at,
             )
     answered = accept_reply(
-        initial, token=initial.reference_token, supplier_id=initial.supplier_id,
-        signal_id="SIG-1", gated=True, now=NOW + timedelta(hours=1),
+        initial,
+        token=initial.reference_token,
+        supplier_id=initial.supplier_id,
+        signal_id="SIG-1",
+        gated=True,
+        now=NOW + timedelta(hours=1),
     )
     assert answered.status is DialogueStatus.ANSWERED
     assert answered.reply_signal_id == "SIG-1"

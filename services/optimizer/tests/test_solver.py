@@ -61,12 +61,26 @@ def test_br_20_selects_only_one_freight_mode_per_shipment() -> None:
     demands = [need("one", 100, 1_000), need("two", 100, 900)]
     candidates = [
         Candidate(
-            "one", "air", NOW + timedelta(hours=2), 100, 0, 10,
-            (), "ratecard:AIR", exclusive_group="PO-1#10",
+            "one",
+            "air",
+            NOW + timedelta(hours=2),
+            100,
+            0,
+            10,
+            (),
+            "ratecard:AIR",
+            exclusive_group="PO-1#10",
         ),
         Candidate(
-            "two", "road", NOW + timedelta(hours=3), 100, 0, 10,
-            (), "ratecard:ROAD", exclusive_group="PO-1#10",
+            "two",
+            "road",
+            NOW + timedelta(hours=3),
+            100,
+            0,
+            10,
+            (),
+            "ratecard:ROAD",
+            exclusive_group="PO-1#10",
         ),
     ]
 

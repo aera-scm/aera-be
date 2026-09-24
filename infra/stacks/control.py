@@ -54,20 +54,23 @@ class ControlStack(Stack):
         tables = data.tables
         policy_arn = add_reasoning_policy(self, env_name)
         reasoning_guardrail = bedrock.CfnGuardrail(
-            self, "ReasoningGuardrail",
+            self,
+            "ReasoningGuardrail",
             name=f"aera-{env_name}-approval-reasoning",
             description="English approval policy findings (FR-VER-04)",
             blocked_input_messaging="Automated Reasoning policy flagged the input.",
             blocked_outputs_messaging="Automated Reasoning policy flagged the output.",
             automated_reasoning_policy_config=(
                 bedrock.CfnGuardrail.AutomatedReasoningPolicyConfigProperty(
-                    policies=[policy_arn], confidence_threshold=0.8,
+                    policies=[policy_arn],
+                    confidence_threshold=0.8,
                 )
             ),
             kms_key_arn=data.key.key_arn,
         )
         reasoning_version = bedrock.CfnGuardrailVersion(
-            self, "ReasoningGuardrailVersion",
+            self,
+            "ReasoningGuardrailVersion",
             guardrail_identifier=reasoning_guardrail.attr_guardrail_id,
         )
         for key, value in (
@@ -75,7 +78,9 @@ class ControlStack(Stack):
             ("REASONING_GUARDRAIL_VERSION", reasoning_version.attr_version),
         ):
             ssm.StringParameter(
-                self, f"Param{key}", parameter_name=f"/aera/{env_name}/{key}",
+                self,
+                f"Param{key}",
+                parameter_name=f"/aera/{env_name}/{key}",
                 string_value=value,
             )
 
@@ -229,12 +234,17 @@ class ControlStack(Stack):
             "SupplierDialogueSweep",
             rule_name=f"aera-{env_name}-dialogue-sweep",
             schedule=events.Schedule.rate(Duration.minutes(1)),
-            targets=[targets.LambdaFunction(
-                notifier, event=events.RuleTargetInput.from_object({"task": "dialogueSweep"})
-            )],
+            targets=[
+                targets.LambdaFunction(
+                    notifier, event=events.RuleTargetInput.from_object({"task": "dialogueSweep"})
+                )
+            ],
         )
         replies = ServiceFunction(
-            self, "dialogue-replies", env_name=env_name, component="dialogue-replies",
+            self,
+            "dialogue-replies",
+            env_name=env_name,
+            component="dialogue-replies",
             code=code,
         ).function
         for name in ("dialogue", "cases", "audit"):
@@ -271,8 +281,11 @@ class ControlStack(Stack):
             "DailyReliabilityRefresh",
             rule_name=f"aera-{env_name}-reliability-refresh",
             schedule=events.Schedule.rate(Duration.days(1)),
-            targets=[targets.LambdaFunction(reliability, retry_attempts=3,
-                                            dead_letter_queue=dead_letters)],
+            targets=[
+                targets.LambdaFunction(
+                    reliability, retry_attempts=3, dead_letter_queue=dead_letters
+                )
+            ],
         )
         monitor = ServiceFunction(
             self,
@@ -326,8 +339,11 @@ class ControlStack(Stack):
             },
             secrets=(MIRROR_SECRET,),
             parameters=(
-                "SAP_READ_BASE", "GUARDRAIL_ID", "GUARDRAIL_VERSION",
-                "REASONING_GUARDRAIL_ID", "REASONING_GUARDRAIL_VERSION",
+                "SAP_READ_BASE",
+                "GUARDRAIL_ID",
+                "GUARDRAIL_VERSION",
+                "REASONING_GUARDRAIL_ID",
+                "REASONING_GUARDRAIL_VERSION",
                 "REASONING_POLICY_ARN",
             ),
             timeout=Duration.seconds(60),

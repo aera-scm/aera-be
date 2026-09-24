@@ -119,10 +119,14 @@ def test_fr_neg_01_supplier_question_tool_queues_closed_template(ctx: ToolContex
     tool = BY_NAME["request_supplier_info"]
     assert tool.ends_run and "request_supplier_info" in ENDING
 
-    result = tool.invoke(ctx, {
-        "caseId": CASE, "templateId": "CONFIRM_PARTIAL_QTY",
-        "fields": {"poNumber": "4500001234"},
-    })
+    result = tool.invoke(
+        ctx,
+        {
+            "caseId": CASE,
+            "templateId": "CONFIRM_PARTIAL_QTY",
+            "fields": {"poNumber": "4500001234"},
+        },
+    )
 
     assert result["status"] == "WAITING_SUPPLIER"
     case = ctx.cases.get(CASE)
@@ -139,14 +143,25 @@ def test_fr_neg_01_supplier_question_tool_queues_closed_template(ctx: ToolContex
 
 
 def test_fr_lrn_03_reliability_tool_returns_sap_sample_and_refs(ctx: ToolContext) -> None:
-    assert BY_NAME["get_supplier_reliability"].invoke(ctx, {
-        "supplierId": "1000234", "material": "MAT-48219",
-    })["status"] == "NO_RECENT_SAP_HISTORY"
+    assert (
+        BY_NAME["get_supplier_reliability"].invoke(
+            ctx,
+            {
+                "supplierId": "1000234",
+                "material": "MAT-48219",
+            },
+        )["status"]
+        == "NO_RECENT_SAP_HISTORY"
+    )
 
     ReliabilityJob(ctx.sap, ctx.dynamodb, ENV).refresh(T0)
-    result = BY_NAME["get_supplier_reliability"].invoke(ctx, {
-        "supplierId": "1000234", "material": "MAT-48219",
-    })
+    result = BY_NAME["get_supplier_reliability"].invoke(
+        ctx,
+        {
+            "supplierId": "1000234",
+            "material": "MAT-48219",
+        },
+    )
 
     assert result["status"] == "AVAILABLE"
     assert result["sampleSize"] == 12
@@ -155,10 +170,14 @@ def test_fr_lrn_03_reliability_tool_returns_sap_sample_and_refs(ctx: ToolContext
 
 
 def test_br_19_supplier_tool_rejects_agent_injected_fields(ctx: ToolContext) -> None:
-    result = BY_NAME["request_supplier_info"].invoke(ctx, {
-        "caseId": CASE, "templateId": "CONFIRM_PARTIAL_QTY",
-        "fields": {"poNumber": "4500001234", "bankDetails": "attacker"},
-    })
+    result = BY_NAME["request_supplier_info"].invoke(
+        ctx,
+        {
+            "caseId": CASE,
+            "templateId": "CONFIRM_PARTIAL_QTY",
+            "fields": {"poNumber": "4500001234", "bankDetails": "attacker"},
+        },
+    )
     assert "error" in result
     case = ctx.cases.get(CASE)
     assert case is not None and case.status is CaseStatus.INVESTIGATING
@@ -314,26 +333,46 @@ def test_alternate_supplier_option(ctx: ToolContext) -> None:
 
 
 def test_fr_lrn_02_alt_supplier_arrival_uses_sourced_p90_buffer(ctx: ToolContext) -> None:
-    base = calc.calc_option(ctx, CASE, "ALTERNATE_SUPPLIER", {
-        "supplierId": "1000871", "qty": 800,
-    })
-    ctx.dynamodb.put_item(TableName="aera-test-analytics", Item=to_item({
-        "PK": "SUPPLIER#1000871", "SK": "MATERIAL#MAT-48219",
-        "supplierId": "1000871", "material": "MAT-48219", "sampleSize": 12,
-        "p90DelayDays": 3, "computedAt": T0,
-        "sourceRefs": ["SAP:API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentItem"],
-    }))
+    base = calc.calc_option(
+        ctx,
+        CASE,
+        "ALTERNATE_SUPPLIER",
+        {
+            "supplierId": "1000871",
+            "qty": 800,
+        },
+    )
+    ctx.dynamodb.put_item(
+        TableName="aera-test-analytics",
+        Item=to_item(
+            {
+                "PK": "SUPPLIER#1000871",
+                "SK": "MATERIAL#MAT-48219",
+                "supplierId": "1000871",
+                "material": "MAT-48219",
+                "sampleSize": 12,
+                "p90DelayDays": 3,
+                "computedAt": T0,
+                "sourceRefs": ["SAP:API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentItem"],
+            }
+        ),
+    )
 
-    adjusted = calc.calc_option(ctx, CASE, "ALTERNATE_SUPPLIER", {
-        "supplierId": "1000871", "qty": 800,
-    })
+    adjusted = calc.calc_option(
+        ctx,
+        CASE,
+        "ALTERNATE_SUPPLIER",
+        {
+            "supplierId": "1000871",
+            "qty": 800,
+        },
+    )
 
     assert datetime.fromisoformat(adjusted["arrival"].replace("Z", "+00:00")) == (
         datetime.fromisoformat(base["arrival"].replace("Z", "+00:00")) + timedelta(days=3)
     )
     assert adjusted["actions"][0]["deliveryDate"] == base["actions"][0]["deliveryDate"]
-    assert {f["name"]: f["value"] for f in adjusted["figures"]}[
-        "supplierSampleSize"] == 12
+    assert {f["name"]: f["value"] for f in adjusted["figures"]}["supplierSampleSize"] == 12
 
 
 # Plan proposal (FR-OPT-01, FR-OPT-03, FR-OPT-04) -----------------------------------------

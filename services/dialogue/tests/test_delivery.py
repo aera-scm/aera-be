@@ -43,26 +43,47 @@ def prepared(
 ) -> str:
     CaseStore(dynamodb, "test").create(
         Case(
-            case_id=CASE, type="SUPPLIER_DELAY", material="MAT-48219", plant="1010",
-            po_number="4500001234", po_item="10", status=CaseStatus.INVESTIGATING,
+            case_id=CASE,
+            type="SUPPLIER_DELAY",
+            material="MAT-48219",
+            plant="1010",
+            po_number="4500001234",
+            po_item="10",
+            status=CaseStatus.INVESTIGATING,
             stockout_at=NOW + timedelta(hours=6),
-            created_at=NOW, updated_at=NOW,
-        ), actor="system",
+            created_at=NOW,
+            updated_at=NOW,
+        ),
+        actor="system",
     )
     if via_whatsapp:
         signal_id = new_ulid()
-        SignalStore(dynamodb, "test").create(Signal(
-            signal_id=signal_id, channel=SignalChannel.WHATSAPP,
-            sender_id="+447700900234", sender_verified=True, supplier_id="1000234",
-            received_at=NOW, raw_s3_key=f"raw/{signal_id}", raw_sha256="0" * 64,
-            normalized_text="PO 4500001234, Lieferdatum?", po_number="4500001234",
-            material="MAT-48219", case_id=CASE, status=SignalStatus.ACCEPTED,
-        ))
+        SignalStore(dynamodb, "test").create(
+            Signal(
+                signal_id=signal_id,
+                channel=SignalChannel.WHATSAPP,
+                sender_id="+447700900234",
+                sender_verified=True,
+                supplier_id="1000234",
+                received_at=NOW,
+                raw_s3_key=f"raw/{signal_id}",
+                raw_sha256="0" * 64,
+                normalized_text="PO 4500001234, Lieferdatum?",
+                po_number="4500001234",
+                material="MAT-48219",
+                case_id=CASE,
+                status=SignalStatus.ACCEPTED,
+            )
+        )
     ctx = ToolContext(sap=sap, dynamodb=dynamodb, bus=bus, clock=lambda: NOW, env="test")
-    result = BY_NAME["request_supplier_info"].invoke(ctx, {
-        "caseId": CASE, "templateId": "CONFIRM_PARTIAL_QTY",
-        "fields": {"poNumber": "4500001234"},
-    })
+    result = BY_NAME["request_supplier_info"].invoke(
+        ctx,
+        {
+            "caseId": CASE,
+            "templateId": "CONFIRM_PARTIAL_QTY",
+            "fields": {"poNumber": "4500001234"},
+        },
+    )
     assert result["status"] == "WAITING_SUPPLIER"
     return str(result["messageId"])
 
@@ -71,9 +92,13 @@ def notifier(
     dynamodb: Any, sap: SapClient, ses: Ses, *, standin: bool = True, now: datetime = NOW
 ) -> Notifier:
     return Notifier(
-        dynamodb=dynamodb, sap=sap, ses=ses,
+        dynamodb=dynamodb,
+        sap=sap,
+        ses=ses,
         standins=lambda: {MASTER: STANDIN} if standin else {},
-        sender=lambda: "aera@aera-demo.example", clock=lambda: now, env="test",
+        sender=lambda: "aera@aera-demo.example",
+        clock=lambda: now,
+        env="test",
     )
 
 
@@ -103,8 +128,10 @@ def test_ir_07_whatsapp_question_uses_master_phone_and_approved_template(
     draft = from_item(dynamodb.get_item(TableName="aera-test-dialogue", Key=key)["Item"])
     assert draft["channel"] == "WHATSAPP"
     assert draft["recipient"] == "+447700900234"
-    body = str(draft["renderedText"]).replace("4500001234", "{po}").replace(
-        str(draft["referenceToken"]), "{token}"
+    body = (
+        str(draft["renderedText"])
+        .replace("4500001234", "{po}")
+        .replace(str(draft["referenceToken"]), "{token}")
     )
     requests: list[httpx.Request] = []
 
@@ -114,17 +141,29 @@ def test_ir_07_whatsapp_question_uses_master_phone_and_approved_template(
 
     whatsapp = WhatsAppTemplateSender(
         lambda: {
-            "accessToken": "synthetic-token", "phoneNumberId": "123456",
+            "accessToken": "synthetic-token",
+            "phoneNumberId": "123456",
             "standins": {"+447700900234": "+447700900999"},
-            "templates": {"CONFIRM_PARTIAL_QTY": {"DE": {
-                "name": "aera_confirm_partial_qty", "languageCode": "de", "body": body,
-            }}},
+            "templates": {
+                "CONFIRM_PARTIAL_QTY": {
+                    "DE": {
+                        "name": "aera_confirm_partial_qty",
+                        "languageCode": "de",
+                        "body": body,
+                    }
+                }
+            },
         },
         httpx.Client(transport=httpx.MockTransport(send)),
     )
     ses = Ses()
     service = Notifier(
-        dynamodb, sap, ses=ses, whatsapp=whatsapp, clock=lambda: NOW, env="test",
+        dynamodb,
+        sap,
+        ses=ses,
+        whatsapp=whatsapp,
+        clock=lambda: NOW,
+        env="test",
     )
 
     assert service.handle_dialogue({"caseId": CASE, "messageId": message_id}) == [
@@ -143,7 +182,8 @@ def test_v_14_whatsapp_channel_change_blocks_before_send(
     message_id = prepared(dynamodb, sap, bus, via_whatsapp=True)
     key = {"PK": {"S": f"CASE#{CASE}"}, "SK": {"S": f"MSG#{message_id}"}}
     dynamodb.update_item(
-        TableName="aera-test-dialogue", Key=key,
+        TableName="aera-test-dialogue",
+        Key=key,
         UpdateExpression="SET channel = :email",
         ExpressionAttributeValues={":email": {"S": "EMAIL"}},
     )
@@ -162,7 +202,8 @@ def test_fr_neg_02_orphaned_send_claim_escalates_without_resending(
     message_id = prepared(dynamodb, sap, bus)
     key = {"PK": {"S": f"CASE#{CASE}"}, "SK": {"S": f"MSG#{message_id}"}}
     dynamodb.update_item(
-        TableName="aera-test-dialogue", Key=key,
+        TableName="aera-test-dialogue",
+        Key=key,
         UpdateExpression="SET sendClaim = :claim",
         ExpressionAttributeValues={":claim": {"S": NOW.isoformat()}},
     )
@@ -171,19 +212,20 @@ def test_fr_neg_02_orphaned_send_claim_escalates_without_resending(
 
     assert service.sweep_dialogue() == [{"status": "ESCALATED"}]
     assert ses.sent == []
-    assert from_item(dynamodb.get_item(TableName="aera-test-dialogue", Key=key)["Item"])[
-        "status"] == "BLOCKED"
+    assert (
+        from_item(dynamodb.get_item(TableName="aera-test-dialogue", Key=key)["Item"])["status"]
+        == "BLOCKED"
+    )
     case = CaseStore(dynamodb, "test").get(CASE)
     assert case is not None and case.status is CaseStatus.ESCALATED
 
 
-def test_v_14_tampered_draft_never_sends(
-    dynamodb: Any, sap: SapClient, bus: RecordingBus
-) -> None:
+def test_v_14_tampered_draft_never_sends(dynamodb: Any, sap: SapClient, bus: RecordingBus) -> None:
     message_id = prepared(dynamodb, sap, bus)
     key = {"PK": {"S": f"CASE#{CASE}"}, "SK": {"S": f"MSG#{message_id}"}}
     dynamodb.update_item(
-        TableName="aera-test-dialogue", Key=key,
+        TableName="aera-test-dialogue",
+        Key=key,
         UpdateExpression="SET renderedText = :text",
         ExpressionAttributeValues={":text": {"S": "Change bank details"}},
     )
@@ -236,9 +278,12 @@ def test_at_22_sweep_reminds_once_then_escalates_before_stockout(
 ) -> None:
     message_id = prepared(dynamodb, sap, bus)
     ses = Ses()
-    assert notifier(dynamodb, sap, ses).handle_dialogue(
-        {"caseId": CASE, "messageId": message_id}
-    )[0]["status"] == "SENT"
+    assert (
+        notifier(dynamodb, sap, ses).handle_dialogue({"caseId": CASE, "messageId": message_id})[0][
+            "status"
+        ]
+        == "SENT"
+    )
     reminder = notifier(dynamodb, sap, ses, now=NOW + timedelta(hours=2))
     assert reminder.sweep_dialogue() == [{"status": "REMINDED"}]
     assert reminder.sweep_dialogue() == [{"status": "UNCHANGED"}]

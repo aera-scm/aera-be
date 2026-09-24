@@ -198,29 +198,44 @@ def portfolio_results() -> list[dict[str, Any]]:
     rows = []
     for name, resource, values, costs, capacity, late, selected, optimum in PORTFOLIOS:
         needs = [
-            Need(f"{name}-{i}", f"need-{i}", NOW + timedelta(hours=8), 100,
-                 value, "SAP:ORDER")
+            Need(f"{name}-{i}", f"need-{i}", NOW + timedelta(hours=8), 100, value, "SAP:ORDER")
             for i, value in enumerate(values)
         ]
         actions = [
-            Candidate(f"{name}-{i}", f"action-{i}",
-                      NOW + timedelta(hours=9 if i in late else 5), 100, 0,
-                      cost, (resource,), "ratecard:TEST")
+            Candidate(
+                f"{name}-{i}",
+                f"action-{i}",
+                NOW + timedelta(hours=9 if i in late else 5),
+                100,
+                0,
+                cost,
+                (resource,),
+                "ratecard:TEST",
+            )
             for i, cost in enumerate(costs)
         ]
         answer = solve(needs, actions, [Capacity(resource, capacity, "SAP:CAPACITY")])
         chosen = tuple(int(a.candidate_id[-1]) for a in answer.allocations)
         deviation = (
             abs(answer.objective_cents - optimum) / optimum
-            if answer.objective_cents is not None and optimum else None
+            if answer.objective_cents is not None and optimum
+            else None
         )
-        rows.append({
-            "id": name, "status": answer.status, "objectiveCents": answer.objective_cents,
-            "knownOptimumCents": optimum, "selectedCases": chosen,
-            "expectedCases": selected, "deviation": deviation,
-            "passed": answer.status in {"OPTIMAL", "FEASIBLE"}
-            and deviation is not None and deviation <= 0.01 and chosen == selected,
-        })
+        rows.append(
+            {
+                "id": name,
+                "status": answer.status,
+                "objectiveCents": answer.objective_cents,
+                "knownOptimumCents": optimum,
+                "selectedCases": chosen,
+                "expectedCases": selected,
+                "deviation": deviation,
+                "passed": answer.status in {"OPTIMAL", "FEASIBLE"}
+                and deviation is not None
+                and deviation <= 0.01
+                and chosen == selected,
+            }
+        )
     return rows
 
 
@@ -357,11 +372,14 @@ class Run:
         )
         self.extraction = Extraction(
             signals=self.signals,
-            textract=(RecordedOcr(case.multilingual_quantity, case.multilingual_language)
-                      if case.multilingual_language is not None
-                      and case.multilingual_quantity is not None else Ocr()),
-            comprehend=(RecordedLanguage() if case.multilingual_language is not None
-                        else Language()),
+            textract=(
+                RecordedOcr(case.multilingual_quantity, case.multilingual_language)
+                if case.multilingual_language is not None and case.multilingual_quantity is not None
+                else Ocr()
+            ),
+            comprehend=(
+                RecordedLanguage() if case.multilingual_language is not None else Language()
+            ),
             bucket=RAW_BUCKET,
             sap=self.sap,
             guardrail=guard,
@@ -485,8 +503,11 @@ def _score(run: Run, result: CaseResult) -> None:
                 extracted_actual = extracted_signal.language
             else:
                 extracted_actual = next(
-                    (f"{f.value}:{f.status.value}" for f in extracted_signal.fields
-                     if f.name == name),
+                    (
+                        f"{f.value}:{f.status.value}"
+                        for f in extracted_signal.fields
+                        if f.name == name
+                    ),
                     None,
                 )
         result.expect("extracted", name, expected, extracted_actual)
@@ -629,7 +650,8 @@ def _pct(pair: tuple[int, int]) -> str:
 
 
 def report(
-    results: list[CaseResult], subset: str | None,
+    results: list[CaseResult],
+    subset: str | None,
     portfolios: list[dict[str, Any]] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     values = metrics(results)
@@ -640,10 +662,13 @@ def report(
         "subset": subset or "all",
         "mode": "offline (scripted planner, Guardrail stand-ins)",
         "limitations": (
-            ["Reference-seed variants; not proven held out before prompt tuning",
-             "Scripted plan choices and recorded cloud-service stand-ins",
-             "Live agent, dialogue, channel and Lab targets not measured"]
-            if subset is None else []
+            [
+                "Reference-seed variants; not proven held out before prompt tuning",
+                "Scripted plan choices and recorded cloud-service stand-ins",
+                "Live agent, dialogue, channel and Lab targets not measured",
+            ]
+            if subset is None
+            else []
         ),
         "metrics": {k: list(v) for k, v in values.items()},
         "cases": [
@@ -700,7 +725,9 @@ def report(
         lines.append(f"| {category} | {sum(r.passed for r in group)}/{len(group)} |")
     if subset is None:
         lines += [
-            "", "## Method and limits", "",
+            "",
+            "## Method and limits",
+            "",
             "The offline runner uses scripted plan choices and recorded Guardrail, OCR and "
             "language stand-ins. Its 150 cases include parameter and signal-context "
             "variants of the reference seed; 30 adversarial scenarios reuse six hostile "

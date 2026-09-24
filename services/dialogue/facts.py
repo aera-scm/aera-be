@@ -17,24 +17,28 @@ BP_SERVICE = "API_BUSINESS_PARTNER"
 
 
 def load_facts(
-    cases: CaseStore, sap: SapClient, case_id: str,
-    *, expected_status: CaseStatus = CaseStatus.INVESTIGATING,
+    cases: CaseStore,
+    sap: SapClient,
+    case_id: str,
+    *,
+    expected_status: CaseStatus = CaseStatus.INVESTIGATING,
     signals: SignalStore | None = None,
     selected_channel: Literal["EMAIL", "WHATSAPP"] | None = None,
 ) -> SupplierFacts:
     case = cases.get(case_id)
     if case is None or case.status is not expected_status or not case.po_number:
-        raise ValueError(
-            f"supplier question requires an open PO in {expected_status.value} state"
-        )
+        raise ValueError(f"supplier question requires an open PO in {expected_status.value} state")
     po = sap.get(
-        PO_SERVICE, "A_PurchaseOrder", {"PurchaseOrder": case.po_number},
+        PO_SERVICE,
+        "A_PurchaseOrder",
+        {"PurchaseOrder": case.po_number},
         expand="to_PurchaseOrderItem",
     )
     supplier = str(po.data.get("Supplier") or "")
     items = results(po.data.get("to_PurchaseOrderItem"))
     active = [
-        item for item in items
+        item
+        for item in items
         if (not case.po_item or str(item.get("PurchaseOrderItem")) == case.po_item)
         and not item.get("PurchasingDocumentDeletionCode")
         and item.get("IsCompletelyDelivered") is not True
@@ -51,8 +55,10 @@ def load_facts(
     channel = selected_channel or "EMAIL"
     if selected_channel is None and signals is not None:
         eligible = [
-            signal for signal in signals.for_case(case_id)
-            if signal.status is SignalStatus.ACCEPTED and signal.sender_verified
+            signal
+            for signal in signals.for_case(case_id)
+            if signal.status is SignalStatus.ACCEPTED
+            and signal.sender_verified
             and signal.supplier_id == supplier
             and signal.channel in (SignalChannel.EMAIL, SignalChannel.WHATSAPP)
         ]
@@ -62,12 +68,17 @@ def load_facts(
             if len(channels) != 1:
                 raise ValueError("supplier channel is ambiguous")
             channel = "WHATSAPP" if "WHATSAPP" in channels else "EMAIL"
-    addresses = (partner_phones(sap, supplier) if channel == "WHATSAPP"
-                 else partner_emails(sap, supplier))
+    addresses = (
+        partner_phones(sap, supplier) if channel == "WHATSAPP" else partner_emails(sap, supplier)
+    )
     if len(addresses) != 1:
         raise ValueError("supplier must have one unambiguous master-data destination")
     return SupplierFacts(
-        case_id, supplier, frozenset({case.po_number}), next(iter(addresses)), language,
+        case_id,
+        supplier,
+        frozenset({case.po_number}),
+        next(iter(addresses)),
+        language,
         f"{po.source_ref}/Supplier + {partner.source_ref}/CorrespondenceLanguage",
         channel,
     )

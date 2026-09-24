@@ -12,6 +12,7 @@ def test_runtime_requirements_are_pinned_and_exclude_the_cdk_toolchain() -> None
     names = {r.split("==")[0] for r in requirements}
     assert not names & BUILD_ONLY
     assert {"pydantic", "aws-lambda-powertools", "httpx", "pypdf", "boto3"} <= names
+    assert {"strands-agents", "bedrock-agentcore"} <= names
 
 
 def test_a_directory_is_a_bundle_only_with_code_and_dependencies(tmp_path: Path) -> None:

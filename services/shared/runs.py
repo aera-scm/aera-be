@@ -48,11 +48,10 @@ class RunStore:
             self._client.update_item(
                 TableName=self._table,
                 Key=_meta(case_id),
-                UpdateExpression="SET activeRunId = :run, activeRunAt = :now",
+                UpdateExpression="SET activeRunId = :run",
                 ConditionExpression="attribute_exists(PK) AND attribute_not_exists(activeRunId)",
                 ExpressionAttributeValues={
                     ":run": {"S": run_id},
-                    ":now": {"S": self._clock().isoformat()},
                 },
             )
         except self._client.exceptions.ConditionalCheckFailedException:
@@ -88,7 +87,7 @@ class RunStore:
             self._client.update_item(
                 TableName=self._table,
                 Key=_meta(case_id),
-                UpdateExpression="REMOVE activeRunId, activeRunAt",
+                UpdateExpression="REMOVE activeRunId",
                 ConditionExpression="activeRunId = :run",
                 ExpressionAttributeValues={":run": {"S": run_id}},
             )

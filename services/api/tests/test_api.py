@@ -296,3 +296,94 @@ def test_metrics_carry_the_mrp_header_counts(api: Api, dynamodb: Any) -> None:
         "actionable": 6,
         "suppressed": 208,
     }
+
+
+def test_nfr_rel_04_post_runs_returns_a_run_id_at_once(api: Api, dynamodb: Any) -> None:
+    from services.run_starter.handler import RunStarter
+
+    class Runtime:
+        def invoke_agent_runtime(self, **request: Any) -> dict[str, Any]:
+            return {}
+
+    case_id = make_case(dynamodb, 914, 1, 1, CaseStatus.TRIAGED)
+    api.starter = RunStarter(
+        dynamodb=dynamodb, agentcore=Runtime(), runtime_arn=lambda: "arn", bus=api.bus, env=ENV
+    )
+
+    first = api.handle(request("POST", "/cases/{id}/runs", params={"id": case_id}, body={}))
+    second = api.handle(request("POST", "/cases/{id}/runs", params={"id": case_id}, body={}))
+
+    assert first["statusCode"] == 202 and len(body(first)["runId"]) == 26
+    assert second["statusCode"] == 409
+
+
+def test_runs_are_unavailable_without_a_runtime(api: Api, dynamodb: Any) -> None:
+    case_id = make_case(dynamodb, 914, 1, 1, CaseStatus.TRIAGED)
+    response = api.handle(request("POST", "/cases/{id}/runs", params={"id": case_id}, body={}))
+    assert response["statusCode"] == 503
+
+
+def test_uc_05_answering_the_last_question_makes_the_case_ready_for_a_new_run(
+    api: Api, dynamodb: Any, intake: Intake, bus: RecordingBus
+) -> None:
+    case_id = make_case(dynamodb, 914, 1, 1, CaseStatus.TRIAGED)
+    store = CaseStore(dynamodb, ENV)
+    store.transition(case_id, CaseStatus.INVESTIGATING, actor="system")
+    store.transition(case_id, CaseStatus.WAITING_PLANNER, actor="agent")
+    signal = intake.receive(
+        Inbound(
+            channel=SignalChannel.WHATSAPP,
+            sender_id="+447700900234",
+            body=b"{}",
+            content_type="application/json",
+        )
+    )
+    field = ExtractedField(
+        field_id=f"{signal.signal_id}-01",
+        signal_id=signal.signal_id,
+        name="QUANTITY",
+        value="640",
+        confidence=0.71,
+        status=FieldStatus.UNCONFIRMED,
+    )
+    SignalStore(dynamodb, ENV).save(
+        signal.model_copy(
+            update={"status": SignalStatus.ACCEPTED, "case_id": case_id, "fields": [field]}
+        )
+    )
+    dynamodb.put_item(
+        TableName="aera-test-cases",
+        Item={
+            "PK": {"S": f"CASE#{case_id}"},
+            "SK": {"S": "QUESTION#01"},
+            "status": {"S": "OPEN"},
+            "fieldId": {"S": field.field_id},
+        },
+    )
+
+    api.handle(
+        request(
+            "POST",
+            "/cases/{id}/fields/{fieldId}/confirm",
+            params={"id": case_id, "fieldId": field.field_id},
+            body={},
+        )
+    )
+
+    [ready] = bus.details("CaseReadyForRun")
+    assert ready["data"] == {"caseId": case_id, "reason": "planner answered"}
+    question = dynamodb.get_item(
+        TableName="aera-test-cases",
+        Key={"PK": {"S": f"CASE#{case_id}"}, "SK": {"S": "QUESTION#01"}},
+    )["Item"]
+    assert question["status"]["S"] == "ANSWERED" and question["answeredBy"]["S"] == "user:u-1"
+
+
+def test_fr_tri_03_board_rows_explain_their_rank(api: Api, dynamodb: Any) -> None:
+    make_case(dynamodb, 914, 4_720_000, 6.2, CaseStatus.TRIAGED)
+    make_case(dynamodb, 915, 600_000, 45, CaseStatus.TRIAGED)
+
+    rows = body(api.handle(request("GET", "/cases")))
+
+    assert rows[0]["rankReason"].startswith("EXC-2026-0914 ranks above EXC-2026-0915")
+    assert "rankReason" not in rows[1]

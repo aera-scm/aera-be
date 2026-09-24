@@ -5,7 +5,8 @@ group (NFR-SEC-04). Errors are RFC 7807 problem+json. Mutating routes honour
 `Idempotency-Key`: a repeated key returns the first response instead of acting twice.
 
 Routes: GET /cases, GET /cases/{id}, GET /cases/{id}/trace, POST /signals, GET /signals,
-POST /cases/{id}/fields/{fieldId}/confirm, POST /realtime/ticket, GET /metrics.
+POST /cases/{id}/fields/{fieldId}/confirm, POST /cases/{id}/runs, POST /realtime/ticket,
+GET /metrics.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
 import re
 import secrets
 import time
@@ -22,7 +24,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from services.rules.br_13 import board_key
+from services.rules.br_13 import board_key, rank_reason
+from services.run_starter.handler import RunStarter
 from services.shared import http
 from services.shared.audit import AuditWriter
 from services.shared.case_state import TERMINAL
@@ -90,6 +93,7 @@ class Api:
     bus: Any
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     env: str | None = None
+    starter: RunStarter | None = None
 
     def __post_init__(self) -> None:
         self.cases = CaseStore(self.dynamodb, self.env)
@@ -116,8 +120,6 @@ class Api:
             raise Problem(405, "Method not allowed")
         except Problem as problem:
             return problem.response
-        except ValueError as error:  # an unknown status or type in the query
-            return http.problem(400, "Bad request", str(error))
 
     # Routing ----------------------------------------------------------------------------
 
@@ -126,7 +128,10 @@ class Api:
     ) -> dict[str, Any]:
         _require(user, READERS)
         if resource == "/cases":
-            board = self.board(http.query(event, "status"), http.query(event, "type"))
+            status = http.query(event, "status")
+            if status is not None and status not in CaseStatus.__members__:
+                raise Problem(400, "Unknown status", status)
+            board = self.board(status, http.query(event, "type"))
             return http.response(200, board)
         if resource == "/cases/{id}":
             return http.response(200, self.case_detail(params["id"]))
@@ -152,7 +157,19 @@ class Api:
             return http.response(202, self.upload(body, user))
         if resource == "/cases/{id}/fields/{fieldId}/confirm":
             return http.response(200, self.confirm(params["id"], params["fieldId"], body, user))
+        if resource == "/cases/{id}/runs":
+            return self.start_run(params["id"], user)
         raise Problem(404, "Not found")
+
+    def start_run(self, case_id: str, user: User) -> dict[str, Any]:
+        """NFR-REL-04: returns the run id at once; the run itself is asynchronous."""
+        self._case(case_id)
+        if self.starter is None:
+            raise Problem(503, "Agent runs are not configured in this environment")
+        started = self.starter.start(case_id, reason="planner request", actor=f"user:{user.id}")
+        if started.run_id is None:
+            raise Problem(409, "Run not started", started.reason)
+        return http.response(202, {"runId": started.run_id})
 
     # Reads ------------------------------------------------------------------------------
 
@@ -186,7 +203,18 @@ class Api:
             return Decimal(str((case.stockout_at - now).total_seconds())) / 3600
 
         found.sort(key=lambda c: board_key(c.rar_usd or Decimal(0), hours(c)))
-        return [_case_json(c) for c in found]
+        rows = [_case_json(c) for c in found]
+        for row, case, below in zip(rows, found, found[1:], strict=False):
+            if below is not None:
+                row["rankReason"] = rank_reason(
+                    case.case_id,
+                    case.rar_usd or Decimal(0),
+                    hours(case),
+                    below.case_id,
+                    below.rar_usd or Decimal(0),
+                    hours(below),
+                )
+        return rows
 
     def case_detail(self, case_id: str) -> dict[str, Any]:
         case = self._case(case_id)
@@ -198,6 +226,8 @@ class Api:
 
     def signal_list(self, status: str | None) -> list[dict[str, Any]]:
         """FR-UI-05: quarantined signals are shown with their reason; they have no case."""
+        if status is not None and status not in SignalStatus.__members__:
+            raise Problem(400, "Unknown status", status)
         wanted = SignalStatus(status) if status else SignalStatus.QUARANTINED
         arguments: dict[str, Any] = {
             "TableName": self._signals_table,
@@ -303,6 +333,7 @@ class Api:
                     actor=f"user:{user.id}",
                     environment=self.env,
                 )
+                self._answer_questions(case_id, field_id, user)
                 return confirmed.model_dump(mode="json", by_alias=True)
         raise Problem(404, "Field not found")
 
@@ -322,6 +353,47 @@ class Api:
             ),
         )
         return {"ticket": value, "expiresIn": TICKET_SECONDS}
+
+    def _answer_questions(self, case_id: str, field_id: str, user: User) -> None:
+        """UC-05: the answer closes the agent's question; with none left open, a new run
+        continues the case (SRD 6.3.1)."""
+        page = self.dynamodb.query(
+            TableName=self._cases_table,
+            KeyConditionExpression="PK = :pk AND begins_with(SK, :q)",
+            ExpressionAttributeValues={
+                ":pk": {"S": f"CASE#{case_id}"},
+                ":q": {"S": "QUESTION#"},
+            },
+        )
+        open_questions = 0
+        for item in page.get("Items", []):
+            if item.get("status", {}).get("S") != "OPEN":
+                continue
+            if item.get("fieldId", {}).get("S") == field_id:
+                self.dynamodb.update_item(
+                    TableName=self._cases_table,
+                    Key={"PK": item["PK"], "SK": item["SK"]},
+                    UpdateExpression="SET #s = :answered, answeredBy = :by, answeredAt = :at",
+                    ExpressionAttributeNames={"#s": "status"},
+                    ExpressionAttributeValues={
+                        ":answered": {"S": "ANSWERED"},
+                        ":by": {"S": f"user:{user.id}"},
+                        ":at": {"S": self.clock().isoformat()},
+                    },
+                )
+            else:
+                open_questions += 1
+        case = self.cases.get(case_id)
+        if open_questions == 0 and case is not None and case.status is CaseStatus.WAITING_PLANNER:
+            emit(
+                self.bus,
+                "CaseReadyForRun",
+                {"caseId": case_id, "reason": "planner answered"},
+                component=COMPONENT,
+                case_id=case_id,
+                actor=f"user:{user.id}",
+                environment=self.env,
+            )
 
     # Helpers ----------------------------------------------------------------------------
 
@@ -376,5 +448,15 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 component=COMPONENT,
             ),
             bus=bus,
+            starter=(
+                RunStarter(
+                    dynamodb=dynamodb,
+                    agentcore=runtime.client("bedrock-agentcore"),
+                    runtime_arn=lambda: os.environ["AERA_AGENT_RUNTIME_ARN"],
+                    bus=bus,
+                )
+                if os.environ.get("AERA_AGENT_RUNTIME_ARN")
+                else None
+            ),
         )
     return _api.handle(event)

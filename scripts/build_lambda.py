@@ -26,9 +26,11 @@ MARKERS = ("services/shared", "pydantic", "aws_lambda_powertools")
 
 
 def runtime_requirements(pyproject: Path = ROOT / "pyproject.toml") -> list[str]:
-    project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+    config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    # The agent runtime deploys the same bundle (SRD 6.18), so its SDKs come along.
+    wanted = [*config["project"]["dependencies"], *config["dependency-groups"]["agent"]]
     requirements = []
-    for requirement in project["dependencies"]:
+    for requirement in wanted:
         name = requirement.split("==")[0].split("[")[0].strip().lower()
         if "==" not in requirement:
             raise ValueError(f"{requirement} is not pinned")

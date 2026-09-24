@@ -310,3 +310,35 @@ def test_no_stockout_without_consumption() -> None:
 def test_br_02_threshold_follows_configuration() -> None:
     assert field_status("PRICE", "42.5", 0.9, min_confidence=0.9) == FieldStatus.CONFIRMED
     assert field_status("PRICE", "42.5", 0.96, min_confidence=0.97) == FieldStatus.UNCONFIRMED
+
+
+# FR-TRI-03 -----------------------------------------------------------------------------
+
+
+def test_fr_tri_03_explains_why_the_top_case_outranks_the_next() -> None:
+    from services.rules.br_13 import rank_reason
+
+    text = rank_reason(
+        "EXC-2026-0914",
+        Decimal("4720000"),
+        Decimal("6.2"),
+        "EXC-2026-0915",
+        Decimal("600000"),
+        Decimal("45"),
+    )
+
+    assert text == (
+        "EXC-2026-0914 ranks above EXC-2026-0915: stock runs out in 6.2 h vs 45 h "
+        "(urgency 3 vs 2) and USD 4,720,000 vs USD 600,000 is at risk."
+    )
+
+
+def test_fr_tri_03_explains_a_tie_broken_by_time() -> None:
+    from services.rules.br_13 import rank_reason
+
+    text = rank_reason("A", Decimal("300"), Decimal("10"), "B", Decimal("900"), None)
+
+    assert text == (
+        "A ranks above B: same priority score (USD 900); "
+        "stock runs out sooner (10 h vs no stock-out)."
+    )

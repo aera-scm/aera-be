@@ -1,4 +1,4 @@
-.PHONY: types mirror-local mirror-model register-mirror setup lint typecheck test scan audit check hooks check-budget check-region check-models seed-config provision-secrets budget bootstrap deploy
+.PHONY: agent-local lambda-bundle replay-signals types mirror-local mirror-model register-mirror setup lint typecheck test scan audit check hooks check-budget check-region check-models seed-config provision-secrets budget bootstrap deploy
 
 # Deployment targets read AERA_AWS_PROFILE, AERA_REGION and AERA_BUDGET_* from the
 # environment. Only ENV=dev is accepted; the budget is verified before bootstrap.
@@ -73,3 +73,15 @@ types:
 	mkdir -p build
 	uv run --locked python scripts/export_schemas.py > build/aera-contract.schema.json
 	node scripts/generate-types.mjs build/aera-contract.schema.json $(FE)/src/api/types.generated.ts
+
+# Supervisor on one case against the ENV tables and SAP (SRD 6.18): make agent-local CASE=EXC-2026-0914
+agent-local:
+	AERA_ENV=$(ENV) uv run --locked python scripts/agent_local.py --case $(CASE)
+
+# Lambda and agent code bundle for deploy (AERA_LAMBDA_BUNDLE=build/lambda).
+lambda-bundle:
+	uv run --locked python scripts/build_lambda.py
+
+# Synthetic signals into ENV: make replay-signals T0=<Mirror SCENARIO_T0>
+replay-signals:
+	uv run --locked python scripts/replay_signals.py --env $(ENV) --t0 $(T0)

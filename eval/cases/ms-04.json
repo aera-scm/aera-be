@@ -1,0 +1,86 @@
+{
+  "id": "ms-04",
+  "category": "MATERIAL_SHORTAGE",
+  "subsets": [
+    "ci"
+  ],
+  "description": "Nothing on hand at 1010: the line is short from the first order.",
+  "mirror": [
+    {
+      "entity": "A_MatlStkInAcctMod",
+      "where": {
+        "Material": "MAT-48219",
+        "Plant": "1010",
+        "InventoryStockType": "01"
+      },
+      "set": {
+        "MatlWrhsStkQtyInMatlBaseUnit": "0"
+      }
+    }
+  ],
+  "signals": [
+    "email-01",
+    "whatsapp-01",
+    "carrier-01"
+  ],
+  "plan": {
+    "options": [
+      {
+        "id": "A",
+        "name": "Air freight partial",
+        "actionType": "AIR_FREIGHT",
+        "qtyField": {
+          "signal": "whatsapp-01",
+          "field": "QUANTITY"
+        }
+      },
+      {
+        "id": "B",
+        "name": "Alternate supplier",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "params": {
+          "supplierId": "1000871",
+          "qty": 800
+        }
+      },
+      {
+        "id": "C",
+        "name": "Transfer from 1020",
+        "actionType": "STO",
+        "params": {
+          "fromPlant": "1020",
+          "qty": 600
+        }
+      }
+    ],
+    "chosen": [
+      "C"
+    ],
+    "rationale": "Transfer from 1020.",
+    "confirm": [
+      {
+        "signal": "whatsapp-01",
+        "field": "QUANTITY"
+      }
+    ],
+    "recovery": {
+      "signal": "carrier-01",
+      "field": "ETA"
+    }
+  },
+  "truth": {
+    "figures": {
+      "hoursToStockout": 0.0,
+      "unitsAtRisk": 1550,
+      "rarUsd": 4720000,
+      "lineStopHours": 31.0
+    },
+    "blocked": {
+      "B": [
+        "V-06"
+      ]
+    },
+    "tier": 1,
+    "status": "AUTO_APPROVED"
+  }
+}

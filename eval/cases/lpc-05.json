@@ -1,0 +1,87 @@
+{
+  "id": "lpc-05",
+  "category": "LATE_PO_CLEAR",
+  "subsets": [
+    "ci"
+  ],
+  "description": "1,000 PC on hand at 1010: the stock-out moves to the next day.",
+  "mirror": [
+    {
+      "entity": "A_MatlStkInAcctMod",
+      "where": {
+        "Material": "MAT-48219",
+        "Plant": "1010",
+        "InventoryStockType": "01"
+      },
+      "set": {
+        "MatlWrhsStkQtyInMatlBaseUnit": "1000"
+      }
+    }
+  ],
+  "signals": [
+    "email-01",
+    "whatsapp-01",
+    "carrier-01"
+  ],
+  "plan": {
+    "options": [
+      {
+        "id": "A",
+        "name": "Air freight partial",
+        "actionType": "AIR_FREIGHT",
+        "qtyField": {
+          "signal": "whatsapp-01",
+          "field": "QUANTITY"
+        }
+      },
+      {
+        "id": "B",
+        "name": "Alternate supplier",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "params": {
+          "supplierId": "1000871",
+          "qty": 800
+        }
+      },
+      {
+        "id": "C",
+        "name": "Transfer from 1020",
+        "actionType": "STO",
+        "params": {
+          "fromPlant": "1020",
+          "qty": 600
+        }
+      }
+    ],
+    "chosen": [
+      "C"
+    ],
+    "rationale": "Transfer from 1020.",
+    "confirm": [
+      {
+        "signal": "whatsapp-01",
+        "field": "QUANTITY"
+      }
+    ],
+    "recovery": {
+      "signal": "carrier-01",
+      "field": "ETA"
+    }
+  },
+  "truth": {
+    "figures": {
+      "hoursToStockout": 20.0,
+      "unitsAtRisk": 550,
+      "rarUsd": 3120000,
+      "lineStopHours": 11.0
+    },
+    "blocked": {
+      "B": [
+        "V-06"
+      ]
+    },
+    "tier": 1,
+    "status": "AUTO_APPROVED",
+    "released": 1
+  }
+}

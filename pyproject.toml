@@ -55,8 +55,8 @@ exclude = ["^\\.venv/"]
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers"
 norecursedirs = [".git", ".venv", "node_modules", "cdk.out"]
-pythonpath = [".", "scripts", "tests"]
-testpaths = ["tests", "infra/tests", "services"]
+pythonpath = [".", "scripts", "tests", "eval"]
+testpaths = ["tests", "infra/tests", "services", "eval"]
 
 [tool.pydantic-mypy]
 init_forbid_extra = true

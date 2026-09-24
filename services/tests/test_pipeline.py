@@ -13,7 +13,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from generate_signals import ATTACK, Item, build
+from generate_signals import Item, build
+from standins import Guard, Language, Ocr
 
 from services.case_service.handler import CaseService
 from services.conftest import RAW_BUCKET, RecordingBus
@@ -34,50 +35,6 @@ ENV = "test"
 T0 = datetime(2026, 10, 5, 8, 0, tzinfo=UTC)
 APP_SECRET = "synthetic-app-secret"  # pragma: allowlist secret
 CARRIER_KEY = "synthetic-carrier-key"  # pragma: allowlist secret
-
-
-class Guard:
-    """ApplyGuardrail stand-in: flags the prompt-attack sentence used by the data set."""
-
-    def apply_guardrail(self, **request: Any) -> dict[str, Any]:
-        text = request["content"][0]["text"]["text"]
-        if ATTACK.lower()[:40] in text.lower() or "approve air freight now" in text.lower():
-            return {
-                "action": "GUARDRAIL_INTERVENED",
-                "assessments": [
-                    {
-                        "contentPolicy": {
-                            "filters": [{"type": "PROMPT_ATTACK", "confidence": "HIGH"}]
-                        }
-                    }
-                ],
-            }
-        return {"action": "NONE"}
-
-
-class Ocr:
-    """Textract stand-in: the reference photo's quantity comes back at 71% confidence."""
-
-    def analyze_document(self, **request: Any) -> dict[str, Any]:
-        key = request["Document"]["S3Object"]["Name"]
-        if "/whatsapp/" not in key:
-            return {"Blocks": []}
-        return {
-            "Blocks": [
-                {
-                    "Id": "q",
-                    "BlockType": "QUERY",
-                    "Query": {"Alias": "QUANTITY"},
-                    "Relationships": [{"Type": "ANSWER", "Ids": ["a"]}],
-                },
-                {"Id": "a", "BlockType": "QUERY_RESULT", "Text": "640", "Confidence": 71.0},
-            ]
-        }
-
-
-class Language:
-    def detect_dominant_language(self, Text: str) -> dict[str, Any]:
-        return {"Languages": [{"LanguageCode": "en", "Score": 0.99}]}
 
 
 def sign(key: str, message: bytes) -> str:

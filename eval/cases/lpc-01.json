@@ -1,0 +1,94 @@
+{
+  "id": "lpc-01",
+  "category": "LATE_PO_CLEAR",
+  "subsets": [
+    "ci"
+  ],
+  "description": "Reference scenario: STO plus air freight; alternate supplier under review.",
+  "signals": [
+    "email-01",
+    "whatsapp-01",
+    "carrier-01"
+  ],
+  "plan": {
+    "options": [
+      {
+        "id": "A",
+        "name": "Air freight partial",
+        "actionType": "AIR_FREIGHT",
+        "qtyField": {
+          "signal": "whatsapp-01",
+          "field": "QUANTITY"
+        }
+      },
+      {
+        "id": "B",
+        "name": "Alternate supplier",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "params": {
+          "supplierId": "1000871",
+          "qty": 800
+        }
+      },
+      {
+        "id": "C",
+        "name": "Transfer from 1020",
+        "actionType": "STO",
+        "params": {
+          "fromPlant": "1020",
+          "qty": 600
+        }
+      }
+    ],
+    "chosen": [
+      "C",
+      "A"
+    ],
+    "rationale": "Transfer now, air freight behind it.",
+    "confirm": [
+      {
+        "signal": "whatsapp-01",
+        "field": "QUANTITY"
+      }
+    ],
+    "recovery": {
+      "signal": "carrier-01",
+      "field": "ETA"
+    }
+  },
+  "truth": {
+    "accepted": [
+      "email-01",
+      "whatsapp-01",
+      "carrier-01"
+    ],
+    "figures": {
+      "hoursToStockout": 6.2,
+      "unitsAtRisk": 1240,
+      "rarUsd": 4720000,
+      "lineStopHours": 24.8
+    },
+    "optionCosts": {
+      "A": 38200,
+      "B": 51900,
+      "C": 4100
+    },
+    "blocked": {
+      "B": [
+        "V-06"
+      ]
+    },
+    "tier": 2,
+    "status": "AWAITING_APPROVAL",
+    "released": 1,
+    "acceptable": [
+      [
+        "STO",
+        "AIR_FREIGHT"
+      ],
+      [
+        "STO"
+      ]
+    ]
+  }
+}

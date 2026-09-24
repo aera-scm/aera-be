@@ -1,4 +1,4 @@
-.PHONY: agent-local lambda-bundle replay-signals types mirror-local mirror-model register-mirror setup lint typecheck test scan audit check hooks check-budget check-region check-models seed-config provision-secrets budget bootstrap deploy
+.PHONY: eval agent-local lambda-bundle replay-signals types mirror-local mirror-model register-mirror setup lint typecheck test scan audit check hooks check-budget check-region check-models seed-config provision-secrets budget bootstrap deploy
 
 # Deployment targets read AERA_AWS_PROFILE, AERA_REGION and AERA_BUDGET_* from the
 # environment. Only ENV=dev is accepted; the budget is verified before bootstrap.
@@ -85,3 +85,7 @@ lambda-bundle:
 # Synthetic signals into ENV: make replay-signals T0=<Mirror SCENARIO_T0>
 replay-signals:
 	uv run --locked python scripts/replay_signals.py --env $(ENV) --t0 $(T0)
+
+# WP-13: evaluation report (SRD 8.3, 8.4); SUBSET=ci runs the regression subset.
+eval:
+	uv run --locked python eval/runner.py $(if $(SUBSET),--subset $(SUBSET),)

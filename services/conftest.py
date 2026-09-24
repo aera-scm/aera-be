@@ -24,9 +24,8 @@ def aws(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         yield
 
 
-@pytest.fixture
-def dynamodb(aws: None) -> Any:
-    client = boto3.client("dynamodb", region_name="us-east-1")
+def create_tables(client: Any, env: str = ENV) -> Any:
+    """Every table of the data stack (SRD 6.20), keys and indexes as deployed."""
     for spec in TABLES:
         attributes = {"PK": "S"}
         keys = [{"AttributeName": "PK", "KeyType": "HASH"}]
@@ -48,7 +47,7 @@ def dynamodb(aws: None) -> Any:
                 }
             )
         arguments: dict[str, Any] = {
-            "TableName": f"aera-{ENV}-{spec.name}",
+            "TableName": f"aera-{env}-{spec.name}",
             "KeySchema": keys,
             "AttributeDefinitions": [
                 {"AttributeName": name, "AttributeType": kind} for name, kind in attributes.items()
@@ -59,6 +58,11 @@ def dynamodb(aws: None) -> Any:
             arguments["GlobalSecondaryIndexes"] = indexes
         client.create_table(**arguments)
     return client
+
+
+@pytest.fixture
+def dynamodb(aws: None) -> Any:
+    return create_tables(boto3.client("dynamodb", region_name="us-east-1"))
 
 
 RAW_BUCKET = "aera-test-raw"

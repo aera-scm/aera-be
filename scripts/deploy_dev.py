@@ -10,6 +10,7 @@ accepted; ``final`` is deployed from a tagged release, never from here.
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -78,6 +79,23 @@ def run(
                 raise DeploymentRefusedError("; ".join(problems))
     environment = {"AERA_ENV": env_name, "AWS_REGION": region}
     profile_args = ("--profile", profile)
+    bootstrap_args: tuple[str, ...] = ()
+    inputs = environ or {}
+    qualifier = inputs.get("AERA_CDK_QUALIFIER", "")
+    if inputs.get("AERA_GITHUB_REPOSITORY") or qualifier:
+        execution_policy = inputs.get("AERA_CFN_EXECUTION_POLICY_ARN", "")
+        if not re.fullmatch(r"[a-zA-Z0-9]{1,10}", qualifier) or not re.fullmatch(
+            r"arn:aws:iam::[0-9]{12}:policy/[A-Za-z0-9+=,.@_/-]+", execution_policy
+        ):
+            raise DeploymentRefusedError(
+                "OIDC bootstrap needs an approved qualifier and scoped execution policy (OT-10)."
+            )
+        bootstrap_args = (
+            "--qualifier",
+            qualifier,
+            "--cloudformation-execution-policies",
+            execution_policy,
+        )
 
     if action == "budget":
         stack = f"aera-{env_name}-budget"
@@ -85,7 +103,7 @@ def run(
         return verify()
 
     report = verify()
-    runner((*CDK, "bootstrap", *profile_args), environment)
+    runner((*CDK, "bootstrap", *profile_args, *bootstrap_args), environment)
     if action == "deploy":
         runner((*CDK, "deploy", "--all", "--app", MAIN_APP, *profile_args), environment)
     return report

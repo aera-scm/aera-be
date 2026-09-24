@@ -32,6 +32,42 @@ REPORT = BudgetReport(
 )
 
 
+def test_oidc_bootstrap_requires_scoped_customer_policy() -> None:
+    recorder = Recorder()
+    with pytest.raises(DeploymentRefusedError):
+        run(
+            "bootstrap",
+            env_name="dev",
+            profile="synthetic",
+            region="us-east-1",
+            verify=recorder.verify_ok,
+            runner=recorder.runner,
+            environ={"AERA_GITHUB_REPOSITORY": "example/backend", "AERA_CDK_QUALIFIER": "aeradev"},
+        )
+    assert recorder.events == []
+
+
+def test_oidc_bootstrap_uses_approved_qualifier_and_policy_after_budget() -> None:
+    recorder = Recorder()
+    policy = "arn:aws:iam::123456789012:policy/synthetic-dev-foundations"
+    run(
+        "bootstrap",
+        env_name="dev",
+        profile="synthetic",
+        region="us-east-1",
+        verify=recorder.verify_ok,
+        runner=recorder.runner,
+        environ={"AERA_CDK_QUALIFIER": "aeradev", "AERA_CFN_EXECUTION_POLICY_ARN": policy},
+    )
+    assert recorder.events == ["verify", "bootstrap"]
+    assert recorder.commands[0][-4:] == (
+        "--qualifier",
+        "aeradev",
+        "--cloudformation-execution-policies",
+        policy,
+    )
+
+
 def label(command: Sequence[str]) -> str:
     if "bootstrap" in command:
         return "bootstrap"

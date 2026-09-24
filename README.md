@@ -148,8 +148,56 @@ make provision-secrets ENV=dev   # SAP_SANDBOX_API_KEY from your shell into the 
 own process, never from arguments or files, and never prints it.
 
 Built for the AWS / SAP Agentic AI Hackathon, track: Intelligent Supply Chain.
-# SAP sandbox prerequisite
+## SAP sandbox prerequisite
 
 Read-only SAP transport and official metadata checks are described in
 [`sap-mirror/metadata/README.md`](sap-mirror/metadata/README.md) (IR-01, IR-02).
 Synthetic test success is not live sandbox or schema evidence.
+
+## Identity and deployment foundations
+
+The main CDK app synthesizes all nine stacks in SRD 6.16. Cognito has
+planner/approver/admin groups and a public authorization-code client; no users
+are created. The future browser client must use PKCE S256. Dev callbacks use
+`http://localhost:5173/callback` and logout uses `http://localhost:5173/`.
+The private `aera-dev-web` bucket is encrypted and requires TLS 1.2. CloudFront,
+the console and runtime services remain deferred. Shells contain one unused
+CloudFormation wait-condition handle (no wait condition) to make valid templates;
+the handle URL is never output. The budget app remains independent.
+
+### Optional GitHub OIDC (NFR-SEC-03/06)
+
+OIDC resources are omitted unless `AERA_GITHUB_REPOSITORY` is explicitly set to
+the approved `owner/repository`. Enabling it also requires `AERA_CDK_QUALIFIER`,
+`AERA_BUDGET_NAME` and `AERA_GITHUB_PROVIDER_MODE` (`create` or `existing`). Keep
+the provider mode unchanged after provisioning: changing it removes an owned
+provider. Use `existing` only for a provider managed outside this stack.
+
+Trust permits only `repo:<approved-repository>:ref:refs/heads/main` with audience
+`sts.amazonaws.com`. The deployment role can assume only that qualifier's deploy,
+file-publishing and lookup roles in the current account and approved region,
+read the selected budget, and read the bootstrap version. It cannot bootstrap.
+PR validation has no OIDC permission. No frontend role is provisioned yet.
+
+Before enabling hosted deployment, the account owner must approve a dedicated dev
+bootstrap qualifier and a customer CloudFormation execution policy restricted
+to WP-0 resources in dev (including IAM role/provider operations), with no final
+access and no AdministratorAccess. The policy is an owner-managed prerequisite;
+its contents cannot be inferred from its ARN. Set its ARN locally as
+`AERA_CFN_EXECUTION_POLICY_ARN`. The existing budget-gated bootstrap/deploy command
+passes that policy and qualifier to CDK. Local profile inputs stay private.
+Do not enable hosted deployment until the actual bootstrap roles and execution
+policy have been reviewed in the account.
+
+Configure repository variables `AERA_REGION=us-east-1`, `AERA_OWNER_TAG`,
+`AERA_GITHUB_REPOSITORY`, `AERA_CDK_QUALIFIER`, `AERA_GITHUB_PROVIDER_MODE`,
+`AERA_BUDGET_NAME`, `AERA_BUDGET_LIMIT_USD` and `AERA_DEV_DEPLOY_ROLE_ARN`.
+Preserve any approved model IDs and existing-secret names with the corresponding
+`MODEL_*` and `AERA_SAP_*_SECRET_NAME` variables. These are names/IDs, never keys.
+Set `AERA_DEV_DEPLOY_ENABLED=true` only after initial local provisioning succeeds.
+
+`deploy-dev.yml` requires a successful CI run from a push to main in the same
+repository and checks out that exact tested commit. It gets temporary OIDC
+credentials, verifies the real budget, then deploys the existing foundations.
+It does not bootstrap, provision SAP key values, seed business data, or deploy a
+frontend bundle. Hosted CI, cloud deployment and live SAP evidence remain pending.

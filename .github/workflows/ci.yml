@@ -5,6 +5,7 @@ on:
   pull_request:
   workflow_dispatch:
 permissions:
+  # Validation never receives id-token: write; deployment follows successful main CI.
   contents: read
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}

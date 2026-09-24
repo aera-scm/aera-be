@@ -1,0 +1,69 @@
+name: Deploy dev
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: >-
+      vars.AERA_DEV_DEPLOY_ENABLED == 'true' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AERA_ENV: dev
+      AERA_REGION: ${{ vars.AERA_REGION }}
+      AERA_OWNER_TAG: ${{ vars.AERA_OWNER_TAG }}
+      AERA_GITHUB_REPOSITORY: ${{ vars.AERA_GITHUB_REPOSITORY }}
+      AERA_GITHUB_PROVIDER_MODE: ${{ vars.AERA_GITHUB_PROVIDER_MODE }}
+      AERA_CDK_QUALIFIER: ${{ vars.AERA_CDK_QUALIFIER }}
+      AERA_BUDGET_NAME: ${{ vars.AERA_BUDGET_NAME }}
+      AERA_BUDGET_LIMIT_USD: ${{ vars.AERA_BUDGET_LIMIT_USD }}
+      MODEL_SUPERVISOR_ID: ${{ vars.MODEL_SUPERVISOR_ID }}
+      MODEL_SMALL_ID: ${{ vars.MODEL_SMALL_ID }}
+      AERA_SAP_SANDBOX_SECRET_NAME: ${{ vars.AERA_SAP_SANDBOX_SECRET_NAME }}
+      AERA_SAP_MIRROR_SECRET_NAME: ${{ vars.AERA_SAP_MIRROR_SECRET_NAME }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version-file: .node-version
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          version: '0.12.18'
+          enable-cache: false
+      - name: Install locked dependencies
+        run: |
+          npm install --global pnpm@12.5.1
+          pnpm install --frozen-lockfile
+          uv sync --locked
+      - name: Validate configuration before obtaining credentials
+        run: >-
+          uv run --locked python -c
+          "import os, sys; sys.path.insert(0, 'scripts'); from deploy_ci import validate;
+          validate(os.environ)"
+      - name: Obtain temporary dev credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37  # v6.1.0
+        with:
+          role-to-assume: ${{ vars.AERA_DEV_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AERA_REGION }}
+          role-duration-seconds: 3600
+          mask-aws-account-id: true
+          unset-current-credentials: true
+      - name: Verify budget and deploy existing foundations
+        run: uv run --locked python scripts/deploy_ci.py

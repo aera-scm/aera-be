@@ -184,7 +184,7 @@ class ControlStack(Stack):
             secrets=(MIRROR_SECRET, "channels/email-standins"),
             parameters=("SAP_READ_BASE",),
         ).function
-        for name in ("cases", "audit"):
+        for name in ("cases", "audit", "dialogue"):
             tables[name].grant_read_write_data(notifier)
         tables["config"].grant_read_data(notifier)
         data.key.grant_encrypt_decrypt(notifier)
@@ -210,6 +210,7 @@ class ControlStack(Stack):
         data.key.grant_encrypt_decrypt(monitor)
         for name, fn, detail_type in (
             ("Notifier", notifier, "NotificationRequested"),
+            ("SupplierDialogue", notifier, "SupplierInfoRequested"),
             ("Monitor", monitor, "GoodsReceiptDue"),
         ):
             events.Rule(

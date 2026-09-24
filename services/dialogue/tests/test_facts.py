@@ -46,5 +46,5 @@ def test_fr_neg_02_refuses_non_investigating_case(dynamodb: Any, sap: SapClient)
         ),
         actor="system",
     )
-    with pytest.raises(ValueError, match="investigating case"):
+    with pytest.raises(ValueError, match="INVESTIGATING state"):
         load_facts(cases, sap, "EXC-2026-0915")

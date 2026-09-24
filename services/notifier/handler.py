@@ -21,13 +21,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from services.dialogue.facts import load_facts
+from services.dialogue.policy import Template, render_question
 from services.shared.audit import AuditWriter
 from services.shared.cases import CaseStore
 from services.shared.dynamo import from_item, table_name, to_item
-from services.shared.models import Case
+from services.shared.models import Case, CaseStatus
+from services.shared.partner import partner_emails
 from services.shared.sap_client import SapClient, SapNotFoundError
 
-PARTNER = "API_BUSINESS_PARTNER"
 PO = "API_PURCHASEORDER_PROCESS_SRV"
 # Internal roles as business partners in SAP master data (grouping INTL, ADR-0017).
 INTERNAL_ROLES = {"customer_service": "9000001", "production_planning": "9000002"}
@@ -68,25 +70,6 @@ ROLE_TEMPLATES = {
 }
 
 
-def partner_emails(sap: SapClient, partner: str) -> set[str]:
-    addresses = sap.query(
-        PARTNER,
-        "A_BusinessPartnerAddress",
-        filter=f"BusinessPartner eq '{partner}'",
-        select="AddressID",
-    )
-    emails: set[str] = set()
-    for address in addresses:
-        rows = sap.query(
-            PARTNER,
-            "A_AddressEmailAddress",
-            filter=f"AddressID eq '{address.data['AddressID']}'",
-            select="EmailAddress",
-        )
-        emails |= {str(r.data["EmailAddress"]).strip().lower() for r in rows}
-    return emails
-
-
 @dataclass
 class Notifier:
     dynamodb: Any
@@ -102,6 +85,104 @@ class Notifier:
         self.audit = AuditWriter(self.dynamodb, self.env)
         self._cases = table_name("cases", self.env)
         self._config = table_name("config", self.env)
+        self._dialogue = table_name("dialogue", self.env)
+
+    def handle_dialogue(self, data: dict[str, Any]) -> list[dict[str, str]]:
+        case_id, message_id = str(data["caseId"]), str(data["messageId"])
+        key = {"PK": {"S": f"CASE#{case_id}"}, "SK": {"S": f"MSG#{message_id}"}}
+        item = self.dynamodb.get_item(
+            TableName=self._dialogue, Key=key, ConsistentRead=True
+        ).get("Item")
+        if item is None:
+            return []
+        draft = from_item(item)
+        if draft.get("status") != "DRAFT":
+            return [{"status": "DUPLICATE"}]
+        try:
+            facts = load_facts(
+                self.cases, self.sap, case_id, expected_status=CaseStatus.WAITING_SUPPLIER
+            )
+            expected = render_question(
+                facts, str(draft["poNumber"]), Template(str(draft["templateId"])),
+                str(draft["referenceToken"]),
+            )
+            if any((
+                draft.get("supplierId") != expected.supplier_id,
+                draft.get("recipient") != expected.recipient,
+                draft.get("language") != expected.language.value,
+                draft.get("renderedText") != expected.rendered_text,
+                draft.get("englishCopy") != expected.english_copy,
+                draft.get("sourceRef") != expected.source_ref,
+            )):
+                raise ValueError("V-14: draft no longer matches SAP master and template")
+        except (KeyError, ValueError):
+            self._block_dialogue(key, "V-14 or master-data check failed")
+            return [{"status": "BLOCKED"}]
+        recipient = expected.recipient
+        standin = self.standins().get(recipient)
+        sender = self.sender()
+        if not standin or not sender or self.ses is None:
+            self._block_dialogue(key, "no verified delivery stand-in")
+            return [{"status": "BLOCKED"}]
+        try:
+            self.dynamodb.update_item(
+                TableName=self._dialogue, Key=key,
+                UpdateExpression="SET sendClaim = :claim",
+                ConditionExpression="#s = :draft AND attribute_not_exists(sendClaim)",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":draft": {"S": "DRAFT"}, ":claim": {"S": self.clock().isoformat()},
+                },
+            )
+        except self.dynamodb.exceptions.ConditionalCheckFailedException:
+            return [{"status": "DUPLICATE"}]
+        try:
+            self.ses.send_email(
+                Source=sender,
+                Destination={"ToAddresses": [standin]},
+                Message={
+                    "Subject": {"Data": f"{case_id}: PO {expected.po_number} clarification"},
+                    "Body": {"Text": {"Data": expected.rendered_text}},
+                },
+            )
+        except Exception:  # noqa: BLE001 - ambiguous SES failure must not trigger a duplicate send
+            self.dynamodb.update_item(
+                TableName=self._dialogue, Key=key,
+                UpdateExpression="SET #s = :blocked, blockReason = :reason",
+                ConditionExpression="#s = :draft AND attribute_exists(sendClaim)",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":draft": {"S": "DRAFT"}, ":blocked": {"S": "BLOCKED"},
+                    ":reason": {"S": "SES send result unavailable"},
+                },
+            )
+            return [{"status": "BLOCKED"}]
+        self.dynamodb.update_item(
+            TableName=self._dialogue, Key=key,
+            UpdateExpression="SET #s = :sent, sentAt = :now",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":sent": {"S": "SENT"}, ":now": {"S": self.clock().isoformat()},
+            },
+        )
+        self.audit.record(
+            f"CASE#{case_id}", "SUPPLIER_QUESTION_SENT", actor="system", case_id=case_id,
+            payload={"messageId": message_id, "templateId": expected.template.value,
+                     "recipient": recipient, "sourceRef": expected.source_ref},
+        )
+        return [{"recipient": recipient, "status": "SENT"}]
+
+    def _block_dialogue(self, key: dict[str, Any], reason: str) -> None:
+        self.dynamodb.update_item(
+            TableName=self._dialogue, Key=key,
+            UpdateExpression="SET #s = :blocked, blockReason = :reason",
+            ConditionExpression="#s = :draft AND attribute_not_exists(sendClaim)",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":draft": {"S": "DRAFT"}, ":blocked": {"S": "BLOCKED"},
+                ":reason": {"S": reason},
+            },
+        )
 
     # Allowlist (BR-03) ------------------------------------------------------------------
 
@@ -275,4 +356,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             standins=standins,
             sender=sender,
         )
-    return {"outcomes": _notifier.handle(dict((event.get("detail") or {}).get("data") or {}))}
+    data = dict((event.get("detail") or {}).get("data") or {})
+    outcomes = (
+        _notifier.handle_dialogue(data)
+        if (event.get("detail-type") or "") == "SupplierInfoRequested"
+        else _notifier.handle(data)
+    )
+    return {"outcomes": outcomes}

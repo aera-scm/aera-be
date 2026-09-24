@@ -1,41 +1,49 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal as D
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
-from services.routing.logic import Policy, route
+from services.routing.logic import Policy, Route, route
 from services.shared.models import ApproverLimit, ProposedPlan
 from services.verifier.grounding import evaluate
-from services.verifier.logic import Corroboration, Donor, Grounding, OptionEvidence, verify
+from services.verifier.logic import (
+    Corroboration,
+    Donor,
+    Grounding,
+    OptionEvidence,
+    Verification,
+    verify,
+)
 
 NOW = datetime(2026, 9, 24, 8, tzinfo=UTC)
 
 
-def reference():
+def reference() -> tuple[ProposedPlan, dict[str, OptionEvidence]]:
     options = []
     evidence = {}
-    for oid, cost, qty, lead, action in [
+    rows: list[tuple[str, int, int, int, dict[str, Any]]] = [
         (
             "A",
             38200,
             640,
-            8,
+            17,
             {
                 "type": "BOOK_AIR_FREIGHT",
                 "supplierId": "S1",
                 "poNumber": "PO1",
                 "poItem": "10",
                 "qty": 640,
-                "arrival": NOW + timedelta(hours=8),
+                "arrival": NOW + timedelta(hours=17),
             },
         ),
         (
             "B",
             10000,
             1240,
-            4,
+            36,
             {
                 "type": "CREATE_PO_ALTERNATE",
                 "supplierId": "S2",
@@ -49,7 +57,7 @@ def reference():
             "C",
             4100,
             600,
-            3,
+            5,
             {
                 "type": "CREATE_STO",
                 "fromPlant": "1020",
@@ -59,9 +67,10 @@ def reference():
                 "deliveryDate": NOW.date(),
             },
         ),
-    ]:
+    ]
+    for oid, cost, qty, lead, action in rows:
         arrival = NOW + timedelta(hours=lead)
-        figures = [
+        figures: list[dict[str, Any]] = [
             {"name": "costUsd", "value": cost, "sourceRef": f"ratecard:{oid}"},
             {"name": "arrival", "value": str(arrival), "sourceRef": f"ratecard:{oid}"},
         ]
@@ -114,7 +123,11 @@ def reference():
     return plan, evidence
 
 
-def verified(plan=None, evidence=None, **kwargs):
+def verified(
+    plan: ProposedPlan | None = None,
+    evidence: dict[str, OptionEvidence] | None = None,
+    **kwargs: Any,
+) -> Verification:
     default_plan, default_evidence = reference()
     return verify(
         plan or default_plan,
@@ -126,7 +139,7 @@ def verified(plan=None, evidence=None, **kwargs):
     )
 
 
-def limits():
+def limits() -> list[ApproverLimit]:
     return [
         ApproverLimit(
             user_id=user,
@@ -140,7 +153,7 @@ def limits():
     ]
 
 
-def routed(value, **kwargs):
+def routed(value: Verification, **kwargs: Any) -> Route:
     return route(
         value, now=NOW, stockout=NOW + timedelta(hours=6.2), plant="1010", limits=limits(), **kwargs
     )
@@ -161,7 +174,7 @@ def routed(value, **kwargs):
         ("V-12", {"unconfirmed_fields": ("quantity",)}),
     ],
 )
-def test_checks_fail_closed(check, changes):
+def test_checks_fail_closed(check: str, changes: dict[str, Any]) -> None:
     plan, facts = reference()
     facts["C"] = replace(facts["C"], **changes)
     result = verified(plan, facts)
@@ -171,9 +184,11 @@ def test_checks_fail_closed(check, changes):
     assert routed(result).tier == 3
 
 
-def test_V_02_integer_positive_and_coverage_flags():
+def test_V_02_integer_positive_and_coverage_flags() -> None:
     plan, facts = reference()
-    plan.options[2].actions[0].qty = D("0.5")
+    action = plan.options[2].actions[0]
+    assert action.type == "CREATE_STO"
+    action.qty = D("0.5")
     assert not next(
         c
         for c in verified(plan, facts).record.checks
@@ -186,7 +201,7 @@ def test_V_02_integer_positive_and_coverage_flags():
     )
 
 
-def test_V_06_BR_06_reference_B_blocked():
+def test_V_06_BR_06_reference_B_blocked() -> None:
     result = verified()
     assert not next(
         c for c in result.record.checks if c.check_id == "V-06" and c.option_id == "B"
@@ -194,7 +209,7 @@ def test_V_06_BR_06_reference_B_blocked():
     assert routed(result).tier == 2
 
 
-def test_V_13_BR_18_confidence():
+def test_V_13_BR_18_confidence() -> None:
     assert verified().record.confidence == D("0.98")
     assert verified(
         corroboration=Corroboration(agreeing_senders=frozenset({"S1"}))
@@ -204,12 +219,12 @@ def test_V_13_BR_18_confidence():
     assert routed(result).tier == 3
 
 
-def test_BR_05_BR_17_BR_22_reference_split_and_STO_only():
+def test_BR_05_BR_17_BR_22_reference_split_and_STO_only() -> None:
     value = routed(verified())
     assert value.tier == 2
     assert [(p.options, p.tier, p.cost) for p in value.parts] == [
-        (("C",), 1, 4100),
-        (("A",), 2, 38200),
+        (("C",), 1, D(4100)),
+        (("A",), 2, D(38200)),
     ]
     assert len({p.id for p in value.parts}) == 2
     plan, facts = reference()
@@ -219,27 +234,28 @@ def test_BR_05_BR_17_BR_22_reference_split_and_STO_only():
     assert routed(verified(plan, facts)).tier == 2
 
 
-def test_BR_23_deadline_does_not_invent_time_for_late_freight():
+def test_BR_23_deadline_does_not_invent_time_for_late_freight() -> None:
     pending = routed(verified()).parts[-1]
-    assert pending.deadline == NOW + timedelta(hours=6.2) - timedelta(hours=8)
+    assert pending.deadline == NOW + timedelta(hours=6.2) - timedelta(hours=17)
     assert (pending.approver, pending.backup) == ("primary", "backup")
 
 
-def test_BR_05_kill_switch_and_stale_hash():
-    assert routed(verified(), policy=Policy(kill_switch=True)).reason.startswith("KILL_SWITCH")
+def test_BR_05_kill_switch_and_stale_hash() -> None:
+    reason = routed(verified(), policy=Policy(kill_switch=True)).reason
+    assert reason is not None and reason.startswith("KILL_SWITCH")
     result = verified()
     result.record.plan.rationale = "changed"
     assert routed(result).reason == "STALE_VERIFICATION"
 
 
-def test_FR_RTE_04_deterministic_sampling():
+def test_FR_RTE_04_deterministic_sampling() -> None:
     plan, facts = reference()
     plan.chosen, plan.total_cost_usd, plan.coverage_units = ["C"], D(4100), D(600)
     assert routed(verified(plan, facts), policy=Policy(audit_share=D(1))).parts[0].sampled
     assert not routed(verified(plan, facts), policy=Policy(audit_share=D(0))).parts[0].sampled
 
 
-def test_V_13_grounding_adapter_requires_both_scores():
+def test_V_13_grounding_adapter_requires_both_scores() -> None:
     client = Mock()
     client.apply_guardrail.return_value = {
         "assessments": [

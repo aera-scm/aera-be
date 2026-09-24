@@ -27,6 +27,7 @@ from typing import Any
 from services.api import whatif
 from services.api.admin import Admin, AdminError
 from services.api.chat import Chat
+from services.reporting.decision import RecordUnavailable, collect, render_html, render_pdf
 from services.reporting.metrics import kpis
 from services.routing.store import ApprovalConflict, ControlStore
 from services.rules.br_13 import board_key, rank_reason
@@ -173,6 +174,31 @@ class Api:
             return http.response(200, [e.model_dump(mode="json", by_alias=True) for e in events])
         if resource == "/cases/{id}/dialogue":
             return http.response(200, self.dialogue_thread(params["id"]))
+        if resource == "/cases/{id}/decision-record":
+            case_id = params["id"]
+            self._case(case_id)
+            try:
+                record = collect(self.dynamodb, case_id, self.env or "dev")
+            except RecordUnavailable as error:
+                raise Problem(409, "Decision record unavailable", str(error)) from None
+            output = http.query(event, "format") or "json"
+            if output == "html":
+                return http.response(
+                    200, render_html(record), content_type="text/html; charset=utf-8"
+                )
+            if output == "pdf":
+                return {
+                    "statusCode": 200,
+                    "headers": {
+                        "Content-Type": "application/pdf",
+                        "Content-Disposition": f'attachment; filename="{case_id}.pdf"',
+                    },
+                    "isBase64Encoded": True,
+                    "body": base64.b64encode(render_pdf(record)).decode("ascii"),
+                }
+            if output == "json":
+                return http.response(200, record)
+            raise Problem(400, "Unknown decision record format")
         if resource == "/signals":
             return http.response(200, self.signal_list(http.query(event, "status")))
         if resource == "/metrics":
@@ -414,7 +440,8 @@ class Api:
             "TableName": table_name("dialogue", self.env),
             "KeyConditionExpression": "PK = :case AND begins_with(SK, :message)",
             "ExpressionAttributeValues": {
-                ":case": {"S": f"CASE#{case_id}"}, ":message": {"S": "MSG#"},
+                ":case": {"S": f"CASE#{case_id}"},
+                ":message": {"S": "MSG#"},
             },
         }
         messages: list[dict[str, Any]] = []
@@ -422,10 +449,22 @@ class Api:
             page = self.dynamodb.query(**arguments)
             for raw in page.get("Items", []):
                 item = from_item(raw, keep_decimals=False)
-                entry: dict[str, Any] = {key: item[key] for key in (
-                    "messageId", "templateId", "language", "renderedText", "englishCopy",
-                    "status", "createdAt", "sentAt", "reminderSent", "replySignalId",
-                ) if key in item}
+                entry: dict[str, Any] = {
+                    key: item[key]
+                    for key in (
+                        "messageId",
+                        "templateId",
+                        "language",
+                        "renderedText",
+                        "englishCopy",
+                        "status",
+                        "createdAt",
+                        "sentAt",
+                        "reminderSent",
+                        "replySignalId",
+                    )
+                    if key in item
+                }
                 reply_id = item.get("replySignalId")
                 if reply_id:
                     reply = self.signals.get(str(reply_id))

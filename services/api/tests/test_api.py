@@ -125,28 +125,77 @@ def test_fr_rpt_02_metrics_endpoint_keeps_measured_basis(api: Api, dynamodb: Any
     assert api.handle(request("GET", "/metrics", groups="supplier"))["statusCode"] == 403
 
 
-def test_fr_neg_03_dialogue_thread_exposes_case_scoped_status(
-    api: Api, dynamodb: Any
+def test_at_27_decision_record_formats_and_access(
+    api: Api, dynamodb: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    case_id = make_case(dynamodb, 918, 10, None, CaseStatus.TRIAGED)
+    monkeypatch.setattr("services.api.handler.collect", lambda *_: {"caseId": case_id})
+    monkeypatch.setattr("services.api.handler.render_html", lambda *_: "<html>record</html>")
+    monkeypatch.setattr("services.api.handler.render_pdf", lambda *_: b"%PDF-sample")
+    route = "/cases/{id}/decision-record"
+
+    def get(fmt: str | None = None, groups: str = "planner") -> dict[str, Any]:
+        return api.handle(
+            request(
+                "GET",
+                route,
+                params={"id": case_id},
+                groups=groups,
+                query={"format": fmt} if fmt else None,
+            )
+        )
+
+    assert body(get()) == {"caseId": case_id}
+    html_result = get("html")
+    assert html_result["headers"]["Content-Type"] == "text/html; charset=utf-8"
+    assert html_result["body"] == "<html>record</html>"
+    pdf = get("pdf")
+    assert pdf["isBase64Encoded"] is True
+    assert base64.b64decode(pdf["body"]) == b"%PDF-sample"
+    assert get("other")["statusCode"] == 400
+    assert get(groups="supplier")["statusCode"] == 403
+
+
+def test_fr_neg_03_dialogue_thread_exposes_case_scoped_status(api: Api, dynamodb: Any) -> None:
     case_id = make_case(dynamodb, 914, 10, None, CaseStatus.RECEIVED)
     for number in (914, 915):
-        dynamodb.put_item(TableName="aera-test-dialogue", Item=to_item({
-            "PK": f"CASE#EXC-2026-{number:04d}", "SK": "MSG#abc",
-            "messageId": "abc", "templateId": "CONFIRM_SHIP_DATE", "language": "DE",
-            "renderedText": "Lieferdatum?", "englishCopy": "Delivery date?",
-            "status": "SENT", "createdAt": T0,
-        }))
+        dynamodb.put_item(
+            TableName="aera-test-dialogue",
+            Item=to_item(
+                {
+                    "PK": f"CASE#EXC-2026-{number:04d}",
+                    "SK": "MSG#abc",
+                    "messageId": "abc",
+                    "templateId": "CONFIRM_SHIP_DATE",
+                    "language": "DE",
+                    "renderedText": "Lieferdatum?",
+                    "englishCopy": "Delivery date?",
+                    "status": "SENT",
+                    "createdAt": T0,
+                }
+            ),
+        )
 
     response = api.handle(request("GET", "/cases/{id}/dialogue", params={"id": case_id}))
 
     assert response["statusCode"] == 200
-    assert body(response) == [{
-        "messageId": "abc", "templateId": "CONFIRM_SHIP_DATE", "language": "DE",
-        "renderedText": "Lieferdatum?", "englishCopy": "Delivery date?",
-        "status": "SENT", "createdAt": T0.isoformat(),
-    }]
-    assert api.handle(request("GET", "/cases/{id}/dialogue", groups="supplier",
-                              params={"id": case_id}))["statusCode"] == 403
+    assert body(response) == [
+        {
+            "messageId": "abc",
+            "templateId": "CONFIRM_SHIP_DATE",
+            "language": "DE",
+            "renderedText": "Lieferdatum?",
+            "englishCopy": "Delivery date?",
+            "status": "SENT",
+            "createdAt": T0.isoformat(),
+        }
+    ]
+    assert (
+        api.handle(
+            request("GET", "/cases/{id}/dialogue", groups="supplier", params={"id": case_id})
+        )["statusCode"]
+        == 403
+    )
 
 
 def test_nfr_sec_04_roles_are_enforced(api: Api) -> None:

@@ -129,6 +129,7 @@ class EdgeStack(Stack):
             self,
             "Api",
             rest_api_name=f"aera-{env_name}-api",
+            binary_media_types=["application/pdf"],
             deploy_options=apigw.StageOptions(
                 stage_name=env_name,
                 tracing_enabled=True,
@@ -162,6 +163,7 @@ class EdgeStack(Stack):
         signed(case, "GET")
         signed(case.add_resource("trace"), "GET")
         signed(case.add_resource("dialogue"), "GET")
+        signed(case.add_resource("decision-record"), "GET")
         signed(case.add_resource("runs"), "POST")
         signed(case.add_resource("rollback"), "POST")
         signed(case.add_resource("chat"), "POST")

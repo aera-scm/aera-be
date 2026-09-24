@@ -1,10 +1,15 @@
-"""Mirror adapter for reversible STO and schedule-date operations (IR-02)."""
+"""Mirror adapter for the plan actions of SRD 6.8 (IR-02, BR-17).
+
+Reversible: STO, PO date change, schedule-line split. Irreversible: alternate-supplier PO
+and air-freight booking; their compensation stops for manual reconciliation.
+"""
 
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
+from services.execution.freight import FreightBookings
 from services.execution.workflow import Execution, Step
 from services.shared.sap_client import SapClient, SapNotFoundError, SapRecord, Target
 from services.shared.triage import odata_quote
@@ -36,6 +41,8 @@ class SapBoundary:
         revalidate: Callable[[Execution], bool],
         audit: Callable[[str, dict[str, Any]], None],
         sto_header: dict[str, str],
+        bookings: FreightBookings | None = None,
+        key_of: Callable[[Step], str] | None = None,
     ) -> None:
         if sap.write is None or sap.write.target != Target.MIRROR or sap.read != sap.write:
             raise ValueError("execution requires matching Mirror read/write endpoints")
@@ -49,6 +56,8 @@ class SapBoundary:
         self.revalidate = revalidate
         self.audit = audit
         self.header = dict(sto_header)
+        self.bookings = bookings
+        self.key_of = key_of
         self.prepared: dict[tuple[int, str], dict[str, Any]] = {}
 
     def prepare_undo(self, step: Step) -> dict[str, Any]:
@@ -108,6 +117,21 @@ class SapBoundary:
                 else:
                     raise ValueError("split target schedule line already exists")
                 undo = {"type": "DELETE_LINE", "keys": keys}
+        elif action.type == "CREATE_PO_ALTERNATE":
+            material = self.sap.get(
+                "ZAERA_MIRROR_SRV",
+                "MaterialConsumptionRate",
+                {"Material": action.material, "Plant": action.plant},
+            )
+            unit = material.data.get("MaterialBaseUnit")
+            if not isinstance(unit, str) or not unit:
+                raise ValueError("material base unit unavailable")
+            # BR-17: irreversible commitment; deletion before goods receipt is best effort.
+            undo = {"type": "DELETE_PO_ITEM", "baseUnit": unit, "irreversible": True}
+        elif action.type == "BOOK_AIR_FREIGHT":
+            if self.bookings is None or self.key_of is None:
+                raise ValueError("air freight needs the booking register")
+            undo = {"type": "NONE", "irreversible": True}
         else:
             raise ValueError(f"{action.type} needs a durable multi-write adapter before execution")
         self.prepared[(step.index, step.target)] = undo
@@ -175,6 +199,47 @@ class SapBoundary:
                     {**changes, "ScheduleLine": undo["keys"]["ScheduleLine"]},
                 )
             return {"document": action.po_number, "sourceRef": current.source_ref}
+        if action.type == "CREATE_PO_ALTERNATE":
+            record = self.sap.create(
+                PO,
+                "A_PurchaseOrder",
+                {
+                    **self.header,
+                    "PurchaseOrderType": "NB",
+                    "Supplier": action.supplier_id,
+                    "to_PurchaseOrderItem": [
+                        {
+                            "PurchaseOrderItem": "10",
+                            "Plant": action.plant,
+                            "Material": action.material,
+                            "OrderQuantity": str(action.qty),
+                            "PurchaseOrderQuantityUnit": undo["baseUnit"],
+                            "to_ScheduleLine": [
+                                {
+                                    "ScheduleLine": "1",
+                                    "ScheduleLineDeliveryDate": sap_date(action.delivery_date),
+                                    "ScheduleLineOrderQuantity": str(action.qty),
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+            return {"document": record.data["PurchaseOrder"], "sourceRef": record.source_ref}
+        if action.type == "BOOK_AIR_FREIGHT":
+            assert self.bookings is not None and self.key_of is not None
+            document = self.bookings.book(
+                self.key_of(step),
+                {
+                    "supplierId": action.supplier_id,
+                    "poNumber": action.po_number,
+                    "poItem": action.po_item,
+                    "qty": action.qty,
+                    "arrival": action.arrival.isoformat(),
+                    "sourceRefs": list(step.source_refs),
+                },
+            )
+            return {"document": document, "sourceRef": step.source_refs[0]}
         raise ValueError("unsupported action")
 
     def verify(self, step: Step, result: dict[str, Any]) -> bool:
@@ -228,6 +293,24 @@ class SapBoundary:
                 str(record.data["ScheduleLineOrderQuantity"])
             ) == part.qty and record.data["ScheduleLineDeliveryDate"] == sap_date(
                 part.delivery_date
+            )
+        if action.type == "CREATE_PO_ALTERNATE":
+            header = self.sap.get(PO, "A_PurchaseOrder", {"PurchaseOrder": result["document"]})
+            item = self.sap.get(
+                PO, ITEM, {"PurchaseOrder": result["document"], "PurchaseOrderItem": "10"}
+            )
+            return (
+                header.data.get("PurchaseOrderType") == "NB"
+                and header.data.get("Supplier") == action.supplier_id
+                and item.data.get("Material") == action.material
+                and Decimal(str(item.data.get("OrderQuantity"))) == action.qty
+            )
+        if action.type == "BOOK_AIR_FREIGHT":
+            booking = self.bookings.read(result["document"]) if self.bookings else None
+            return (
+                booking is not None
+                and booking.get("poNumber") == action.po_number
+                and Decimal(str(booking.get("qty"))) == action.qty
             )
         return False
 
@@ -292,4 +375,7 @@ class SapBoundary:
             ) != Decimal(str(undo["quantity"])):
                 raise ValueError("split restoration verification failed")
             return {"sourceRef": checked.source_ref, "restored": True}
+        if action.type in ("CREATE_PO_ALTERNATE", "BOOK_AIR_FREIGHT"):
+            # BR-17: irreversible; a human settles cancellation with the supplier or carrier.
+            raise ValueError(f"{action.type} is irreversible; manual reconciliation required")
         raise ValueError("unsupported compensation")

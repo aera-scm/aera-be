@@ -66,4 +66,11 @@ service MirrorAdminService {
     rows       : Integer;
     durationMs : Integer;
   };
+  // AT-08: fail the next `count` S/4 write requests with `status`, after letting `skip`
+  // writes through (e.g. skip 1, count 4, status 500 = the second write fails, retries too).
+  action fault(skip : Integer, count : Integer, status : Integer) returns {
+    skip   : Integer;
+    count  : Integer;
+    status : Integer;
+  };
 }

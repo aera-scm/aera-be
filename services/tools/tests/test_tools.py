@@ -181,7 +181,7 @@ def test_fr_imp_02_reference_impact_matches_the_seed(
         ctx,
         CASE,
         recovery_at=SEA_ETA.isoformat(),
-        recovery_source_ref=f"signal:{carrier.signal_id}/{carrier.fields[0].field_id}",
+        recovery_source_ref=f"signal:{carrier.signal_id}/ETA",
     )
 
     assert impact["hoursToStockout"] == 6.2
@@ -242,7 +242,7 @@ def test_fr_cht_02_planner_confirmed_quantity_is_cited_as_planner(
         {
             "qtyFieldId": field_id,
             "remainderAt": SEA_ETA.isoformat(),
-            "remainderSourceRef": f"signal:{carrier.signal_id}/{carrier.fields[0].field_id}",
+            "remainderSourceRef": f"signal:{carrier.signal_id}/ETA",
         },
     )
 
@@ -448,3 +448,32 @@ def test_gateway_target_serves_only_its_own_tool(monkeypatch: pytest.MonkeyPatch
     assert handler.lambda_handler({}, context) == {
         "error": "this target serves sap_get_stock, not propose_plan"
     }
+
+
+def test_fr_imp_03_every_emitted_source_reference_is_well_formed(
+    ctx: ToolContext, photo: Signal, carrier: Signal
+) -> None:
+    from services.shared.models import Figure
+
+    field_id = confirm(ctx, photo)
+    drafts = [
+        calc.calc_option(ctx, CASE, "STO", {"fromPlant": "1020", "qty": 600}),
+        calc.calc_option(
+            ctx,
+            CASE,
+            "AIR_FREIGHT",
+            {
+                "qtyFieldId": field_id,
+                "remainderAt": SEA_ETA.isoformat(),
+                "remainderSourceRef": f"signal:{carrier.signal_id}/ETA",
+            },
+        ),
+    ]
+    evidence = case_tools.get_case_evidence(ctx, CASE)
+    figures = [f for d in drafts for f in d["figures"]]
+    figures += [
+        {"name": f["name"], "value": f["value"], "sourceRef": f["sourceRef"]}
+        for f in evidence["fields"]
+    ]
+    for figure in figures:
+        Figure.model_validate(figure)  # raises on a malformed sourceRef

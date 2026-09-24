@@ -186,7 +186,7 @@ def _usable_quantity(ctx: ToolContext, case_id: str, field_id: str) -> tuple[Dec
         reference = (
             f"planner:{field.confirmed_by.removeprefix('user:')}"
             if field.confirmed_by
-            else f"signal:{field.signal_id}/{field.field_id}"
+            else f"signal:{field.signal_id}/{field.name}"
         )
         return decimal(field.value.replace(",", ""), "quantity"), reference
     raise ToolError(f"field {field_id} is not evidence of case {case_id}")

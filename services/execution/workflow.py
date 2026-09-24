@@ -217,6 +217,10 @@ class Workflow:
                     raise CompensationFailed("undo record missing")
                 if record["status"] == "UNDONE":
                     continue
+                if record["undo"].get("irreversible"):
+                    # BR-17: nothing to undo in SAP; a human settles it. The rest still unwinds.
+                    self.boundary.audit("ACTION_IRREVERSIBLE", {"key": key})
+                    continue
                 undo_key = f"UNDO#{key}"
                 self.journal.prepare(
                     undo_key,

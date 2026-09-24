@@ -219,6 +219,29 @@ describe("Reset (FR-ADM-03)", () => {
     assert.equal(po.status, 200);
   });
 
+  test("AT-08 fault injection fails the chosen writes only, and reset disarms it", async () => {
+    await reset();
+    const headers = await csrf();
+    const armed = await http.post("/admin/fault", { skip: 1, count: 1, status: 500 }, headers);
+    assert.equal(armed.status, 200, JSON.stringify(armed.data));
+    const url = `${PO}/A_PurchaseOrderScheduleLine(PurchasingDocument='4500001234',PurchasingDocumentItem='10',ScheduleLine='1')`;
+    const write = async () => {
+      const current = await http.get(url);
+      const change = { ScheduleLineDeliveryDate: epoch("2026-10-15T00:00:00.000Z") };
+      return http.patch(url, change, { ...headers, "if-match": current.data.d.__metadata.etag });
+    };
+
+    assert.equal((await write()).status, 204);
+    assert.equal((await write()).status, 500);
+    assert.equal((await write()).status, 204);
+
+    await http.post("/admin/fault", { skip: 0, count: 5, status: 503 }, headers);
+    await reset();
+    assert.equal((await write()).status, 204);
+    const refused = await http.post("/admin/fault", { skip: 0, count: 1, status: 418 }, headers);
+    assert.equal(refused.status, 400);
+  });
+
   test("reset rejects a malformed scenario start", async () => {
     const headers = await csrf();
     const response = await http.post("/admin/reset", { t0: "yesterday" }, headers);

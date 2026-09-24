@@ -63,7 +63,7 @@ def get_case_evidence(ctx: ToolContext, case_id: str) -> dict[str, Any]:
                     "sourceRef": (
                         f"planner:{field.confirmed_by.removeprefix('user:')}"
                         if field.confirmed_by
-                        else f"signal:{field.signal_id}/{field.field_id}"
+                        else f"signal:{field.signal_id}/{field.name}"
                     ),
                 }
             )

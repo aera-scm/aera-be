@@ -12,6 +12,10 @@ cds.i18n.locale.header = (request) => {
   return raw && !/^\s*\*/.test(raw) ? raw : undefined;
 };
 
+// AT-08 fault injection, armed only through the admin service (MirrorAdmin scope).
+const fault = { skip: 0, count: 0, status: 500 };
+const WRITES = new Set(["POST", "PATCH", "MERGE", "PUT", "DELETE"]);
+
 const PURCHASE_ORDER_RANGE = { first: 4500000000, last: 4599999999 };
 const MATERIAL_DOCUMENT_RANGE = { first: 4900000000, last: 4999999999 };
 
@@ -23,6 +27,15 @@ cds.on("bootstrap", (app) => {
     // S/4HANA answers PATCH/MERGE with 204 No Content.
     if (["PATCH", "MERGE", "PUT"].includes(request.method)) {
       request.headers.prefer ??= "return=minimal";
+    }
+    if (WRITES.has(request.method) && fault.count > 0) {
+      if (fault.skip > 0) {
+        fault.skip -= 1;
+      } else {
+        fault.count -= 1;
+        response.status(fault.status).json({ error: { code: String(fault.status), message: { lang: "en", value: "Injected fault" } } });
+        return;
+      }
     }
     next();
   };
@@ -109,7 +122,20 @@ cds.on("served", async (services) => {
   services.MirrorAdminService.on("reset", async (request) => {
     const t0 = scenarioStart(request.data.t0);
     if (!t0) return request.reject(400, "t0 must be an ISO-8601 timestamp");
+    Object.assign(fault, { skip: 0, count: 0, status: 500 });
     return reset(t0);
+  });
+
+  services.MirrorAdminService.on("fault", (request) => {
+    const { skip = 0, count = 0, status = 500 } = request.data;
+    if (![skip, count].every((n) => Number.isInteger(n) && n >= 0 && n <= 20)) {
+      return request.reject(400, "skip and count must be integers from 0 to 20");
+    }
+    if (![429, 500, 502, 503, 504].includes(status)) {
+      return request.reject(400, "status must be 429, 500, 502, 503 or 504");
+    }
+    Object.assign(fault, { skip, count, status });
+    return { ...fault };
   });
 
   const [any] = await SELECT.from(`${s4}.A_PurchaseOrder`).limit(1);

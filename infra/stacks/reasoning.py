@@ -36,7 +36,7 @@ AGENT_PARAMETERS = (
     "GUARDRAIL_VERSION",
 )
 # What each tool may touch besides SAP reads.
-CASE_WRITERS = {"ask_planner", "propose_plan", "escalate"}
+CASE_WRITERS = {"ask_planner", "request_supplier_info", "propose_plan", "escalate"}
 CALCULATORS = {"calc_impact", "calc_option"}
 
 
@@ -110,6 +110,8 @@ class ReasoningStack(Stack):
             if spec.name in CASE_WRITERS:
                 tables["audit"].grant_read_write_data(fn)
                 data.bus.grant_put_events_to(fn)
+            if spec.name == "request_supplier_info":
+                tables["dialogue"].grant_read_write_data(fn)
             fn.grant_invoke(gateway_role)
             agentcore.CfnGatewayTarget(
                 self,

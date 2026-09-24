@@ -11,6 +11,7 @@ from services.case_service.handler import CaseService
 from services.conftest import RecordingBus
 from services.mrp_poller.handler import MrpPoller
 from services.shared.cases import CaseStore
+from services.shared.dynamo import from_item
 from services.shared.models import (
     CaseStatus,
     ExtractedField,
@@ -111,6 +112,39 @@ def confirm(ctx: ToolContext, record: Signal) -> str:
     )
     ctx.signals.save(record.model_copy(update={"fields": [field]}))
     return field.field_id
+
+
+def test_fr_neg_01_supplier_question_tool_queues_closed_template(ctx: ToolContext) -> None:
+    tool = BY_NAME["request_supplier_info"]
+    assert tool.ends_run and "request_supplier_info" in ENDING
+
+    result = tool.invoke(ctx, {
+        "caseId": CASE, "templateId": "CONFIRM_PARTIAL_QTY",
+        "fields": {"poNumber": "4500001234"},
+    })
+
+    assert result["status"] == "WAITING_SUPPLIER"
+    case = ctx.cases.get(CASE)
+    assert case is not None and case.status is CaseStatus.WAITING_SUPPLIER
+    item = ctx.dynamodb.get_item(
+        TableName="aera-test-dialogue",
+        Key={"PK": {"S": f"CASE#{CASE}"}, "SK": {"S": f"MSG#{result['messageId']}"}},
+    )["Item"]
+    message = from_item(item)
+    assert message["recipient"] == "orders@krieger-guss.example"
+    assert message["language"] == "DE"
+    assert message["status"] == "DRAFT"
+    assert message["referenceToken"] in message["renderedText"]
+
+
+def test_br_19_supplier_tool_rejects_agent_injected_fields(ctx: ToolContext) -> None:
+    result = BY_NAME["request_supplier_info"].invoke(ctx, {
+        "caseId": CASE, "templateId": "CONFIRM_PARTIAL_QTY",
+        "fields": {"poNumber": "4500001234", "bankDetails": "attacker"},
+    })
+    assert "error" in result
+    case = ctx.cases.get(CASE)
+    assert case is not None and case.status is CaseStatus.INVESTIGATING
 
 
 # SAP reads (FR-IMP-01) -----------------------------------------------------------------
@@ -416,10 +450,11 @@ def test_srd_6_3_2_catalogue_is_read_only_or_proposal_only() -> None:
         "calc_option",
         "simulate_plan",
         "ask_planner",
+        "request_supplier_info",
         "propose_plan",
         "escalate",
     ]
-    assert ENDING == {"ask_planner", "propose_plan", "escalate"}
+    assert ENDING == {"ask_planner", "request_supplier_info", "propose_plan", "escalate"}
     for tool in TOOLS:
         assert tool.input_schema()["additionalProperties"] is False
 

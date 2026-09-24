@@ -30,7 +30,12 @@ from strands.hooks import (
 from services.shared.models import TraceEvent
 from services.shared.trace import TraceStore
 
-END_REASONS = {"propose_plan": "PLAN", "escalate": "ESCALATE", "ask_planner": "WAITING_PLANNER"}
+END_REASONS = {
+    "propose_plan": "PLAN",
+    "escalate": "ESCALATE",
+    "ask_planner": "WAITING_PLANNER",
+    "request_supplier_info": "WAITING_SUPPLIER",
+}
 THOUGHT_CHARS = 300
 
 

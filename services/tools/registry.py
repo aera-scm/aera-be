@@ -3,7 +3,7 @@
 One definition serves the AgentCore Gateway targets (each tool its own Lambda and read-only
 role) and local runs. Deliberately absent: any tool that writes to SAP, sends a message or
 changes configuration (confused-deputy defence). Tools of later milestones
-(get_supplier_reliability, request_supplier_info, request_replan) are not registered yet.
+(get_supplier_reliability, request_replan) are not registered yet.
 """
 
 from __future__ import annotations
@@ -138,6 +138,15 @@ TOOLS: tuple[ToolSpec, ...] = (
         {"caseId": S, "question": S, "fieldId": S},
         ("caseId", "question"),
         case_tools.ask_planner,
+        ends_run=True,
+    ),
+    ToolSpec(
+        "request_supplier_info",
+        "Request an approved fact question to the supplier of this case's open PO. "
+        "fields must contain only poNumber. Ends the run while dialogue waits.",
+        {"caseId": S, "templateId": S, "fields": {"type": "object"}},
+        ("caseId", "templateId", "fields"),
+        case_tools.request_supplier_info,
         ends_run=True,
     ),
     ToolSpec(

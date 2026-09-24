@@ -17,6 +17,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from services.dialogue.facts import load_facts
+from services.dialogue.policy import Template, render_question
 from services.rules.br_02 import usable
 from services.shared.dynamo import from_item, table_name, to_item
 from services.shared.models import CaseStatus, PlanRecord, ProposedPlan, SignalStatus, new_ulid
@@ -135,6 +137,57 @@ def ask_planner(
         environment=ctx.env,
     )
     return {"status": "WAITING_PLANNER", "questionId": question_id}
+
+
+def request_supplier_info(
+    ctx: ToolContext, case_id: str, template_id: str, fields: dict[str, Any]
+) -> dict[str, Any]:
+    _investigating(ctx, case_id)
+    if not isinstance(fields, dict) or set(fields) != {"poNumber"}:
+        raise ToolError("supplier question fields may contain only poNumber")
+    try:
+        facts = load_facts(ctx.cases, ctx.sap, case_id)
+        question = render_question(
+            facts, str(fields["poNumber"]), Template(template_id), secrets.token_hex(12).upper()
+        )
+    except ValueError as error:
+        raise ToolError(str(error)) from None
+    message_id = new_ulid()
+    ctx.dynamodb.put_item(
+        TableName=table_name("dialogue", ctx.env),
+        Item=to_item(
+            {
+                "PK": f"CASE#{case_id}",
+                "SK": f"MSG#{message_id}",
+                "messageId": message_id,
+                "caseId": case_id,
+                "direction": "OUTBOUND",
+                "supplierId": facts.supplier_id,
+                "language": facts.language.value,
+                "templateId": question.template.value,
+                "poNumber": question.po_number,
+                "recipient": question.recipient,
+                "renderedText": question.rendered_text,
+                "englishCopy": question.english_copy,
+                "referenceToken": question.reference_token,
+                "sourceRef": question.source_ref,
+                "status": "DRAFT",
+                "createdAt": ctx.now().isoformat(),
+            }
+        ),
+        ConditionExpression="attribute_not_exists(PK)",
+    )
+    ctx.cases.transition(
+        case_id, CaseStatus.WAITING_SUPPLIER, actor="agent", reason="supplier fact question",
+        expected=CaseStatus.INVESTIGATING, run_id=ctx.run_id,
+    )
+    emit(
+        ctx.bus, "SupplierInfoRequested",
+        {"caseId": case_id, "messageId": message_id},
+        component=COMPONENT, case_id=case_id, run_id=ctx.run_id,
+        actor="agent", environment=ctx.env,
+    )
+    return {"status": "WAITING_SUPPLIER", "messageId": message_id}
 
 
 def propose_plan(ctx: ToolContext, case_id: str, plan: dict[str, Any]) -> dict[str, Any]:

@@ -16,6 +16,10 @@ dependencies = [
 ]
 
 [dependency-groups]
+agent = [
+    "bedrock-agentcore==1.23.1",
+    "strands-agents==1.57.0",
+]
 dev = [
     "boto3-stubs[bedrock,bedrock-agentcore-control,bedrock-runtime,budgets,comprehend,dynamodb,secretsmanager,ssm,sts,textract]==1.43.100",
     "detect-secrets==1.5.0",
@@ -32,6 +36,8 @@ dev = [
 [tool.uv]
 package = false
 required-version = "==0.12.18"
+# The agent SDKs belong to the agent container (SRD 6.18) but are checked and tested here.
+default-groups = ["dev", "agent"]
 
 [tool.ruff]
 target-version = "py312"

@@ -43,11 +43,11 @@ class Triage:
     figures: list[Figure] = field(default_factory=list)
 
 
-def _quote(value: str) -> str:
+def odata_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _consumption(
+def consumption_rate(
     sap: SapClient, material: str, plant: str, now: datetime
 ) -> tuple[Decimal | None, str]:
     try:
@@ -60,7 +60,7 @@ def _consumption(
     components = sap.query(
         PRODUCTION,
         "A_ProductionOrderComponent_2",
-        filter=f"Material eq {_quote(material)} and Plant eq {_quote(plant)}",
+        filter=f"Material eq {odata_quote(material)} and Plant eq {odata_quote(plant)}",
     )
     horizon = now + timedelta(hours=24)
     due = Decimal(0)
@@ -77,11 +77,11 @@ def _consumption(
     return due / 24, f"SAP:{PRODUCTION}/A_ProductionOrderComponent_2"
 
 
-def _finished_products(sap: SapClient, material: str, plant: str) -> set[str]:
+def finished_products(sap: SapClient, material: str, plant: str) -> set[str]:
     components = sap.query(
         PRODUCTION,
         "A_ProductionOrderComponent_2",
-        filter=f"Material eq {_quote(material)} and Plant eq {_quote(plant)}",
+        filter=f"Material eq {odata_quote(material)} and Plant eq {odata_quote(plant)}",
         select="ManufacturingOrder",
     )
     orders = {str(row.data["ManufacturingOrder"]) for row in components}
@@ -92,13 +92,14 @@ def _finished_products(sap: SapClient, material: str, plant: str) -> set[str]:
     return products
 
 
-def _exposures(sap: SapClient, materials: set[str], plant: str) -> list[SalesExposure]:
+def sales_exposures(sap: SapClient, materials: set[str], plant: str) -> list[SalesExposure]:
     exposures: list[SalesExposure] = []
+    at_plant = odata_quote(plant)
     for material in sorted(materials):
         items = sap.query(
             SALES,
             "A_SalesOrderItem",
-            filter=f"Material eq {_quote(material)} and ProductionPlant eq {_quote(plant)}",
+            filter=f"Material eq {odata_quote(material)} and ProductionPlant eq {at_plant}",
             expand="to_ScheduleLine",
         )
         for item in items:
@@ -134,7 +135,7 @@ def assess(
     stock_rows = sap.query(
         STOCK,
         "A_MatlStkInAcctMod",
-        filter=f"Material eq {_quote(material)} and Plant eq {_quote(plant)}",
+        filter=f"Material eq {odata_quote(material)} and Plant eq {odata_quote(plant)}",
     )
     on_hand = sum(
         (number(r.data.get("MatlWrhsStkQtyInMatlBaseUnit")) for r in stock_rows), Decimal(0)
@@ -144,13 +145,13 @@ def assess(
         if len(stock_rows) == 1
         else f"SAP:{STOCK}/A_MatlStkInAcctMod"
     )
-    per_hour, rate_ref = _consumption(sap, material, plant, now)
+    per_hour, rate_ref = consumption_rate(sap, material, plant, now)
     hours = None if per_hour is None else hours_to_stockout(on_hand, per_hour)
     stockout = None if hours is None else now + timedelta(seconds=int(hours * 3600))
 
-    products = _finished_products(sap, material, plant) | {material}
+    products = finished_products(sap, material, plant) | {material}
     total, threatened = revenue_at_risk(
-        _exposures(sap, products, plant), stockout_at=stockout, recovered_on=recovered_on
+        sales_exposures(sap, products, plant), stockout_at=stockout, recovered_on=recovered_on
     )
     score = priority_score(total, hours)
 

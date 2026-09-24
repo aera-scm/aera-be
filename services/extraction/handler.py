@@ -24,7 +24,7 @@ from typing import Any
 from services.gatekeeper.handler import Guardrail
 from services.rules.br_02 import MIN_CONFIDENCE, field_status
 from services.shared.audit import AuditWriter
-from services.shared.models import ExtractedField, Signal, SignalStatus
+from services.shared.models import ExtractedField, Signal, SignalChannel, SignalStatus
 from services.shared.quarantine import quarantine
 from services.shared.runtime import emit
 from services.shared.sap_client import SapClient, SapError, SapNotFoundError
@@ -43,6 +43,9 @@ QUERIES = (
 )
 _PO = re.compile(r"\b(45\d{8})\b")
 _MATERIAL = re.compile(r"\b(MAT-\d{5})\b")
+_ETA = re.compile(r"\bETA (\d{4}-\d{2}-\d{2}T[0-9:.]+Z?)")
+_TRACKING = re.compile(r"\btracking ([A-Z0-9-]{4,40})")
+_STATUS = re.compile(r"^Carrier status ([A-Z_]{3,30})")
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,20 @@ def textract_readings(client: Any, bucket: str, key: str) -> tuple[list[Reading]
 def text_readings(text: str) -> list[Reading]:
     readings = [Reading("PO_NUMBER", po, 1.0) for po in dict.fromkeys(_PO.findall(text))]
     readings += [Reading("MATERIAL", m, 1.0) for m in dict.fromkeys(_MATERIAL.findall(text))]
+    return readings
+
+
+def carrier_readings(text: str) -> list[Reading]:
+    """Structured carrier event fields (the webhook wrote them as `ETA ...; tracking ...`)."""
+    readings = []
+    for name, pattern in (
+        ("ETA", _ETA),
+        ("TRACKING_NUMBER", _TRACKING),
+        ("CARRIER_STATUS", _STATUS),
+    ):
+        match = pattern.search(text)
+        if match:
+            readings.append(Reading(name, match.group(1), 1.0))
     return readings
 
 
@@ -133,6 +150,8 @@ class Extraction:
         if signal is None or signal.status is not SignalStatus.ACCEPTED or signal.fields:
             return signal
         readings = text_readings(signal.normalized_text or "")
+        if signal.channel is SignalChannel.CARRIER:
+            readings += carrier_readings(signal.normalized_text or "")
         ocr_text: list[str] = []
         for key in signal.attachments:
             if key.lower().endswith(DOCUMENT_SUFFIXES):

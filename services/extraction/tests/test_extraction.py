@@ -196,3 +196,17 @@ def test_textract_keeps_the_most_confident_answer() -> None:
     readings, _ = textract_readings(FakeTextract(response), "b", "k")
 
     assert [(r.value, r.confidence) for r in readings] == [("640", 0.71)]
+
+
+def test_carrier_events_carry_eta_tracking_and_status_as_fields() -> None:
+    from services.extraction.handler import carrier_readings
+
+    text = (
+        "Carrier status DELAYED; tracking NFL-SEA-448120; PO 4500001234; material MAT-48219; "
+        "ETA 2026-10-14T08:00:00Z; note Held at port"
+    )
+    assert [(r.name, r.value) for r in carrier_readings(text)] == [
+        ("ETA", "2026-10-14T08:00:00Z"),
+        ("TRACKING_NUMBER", "NFL-SEA-448120"),
+        ("CARRIER_STATUS", "DELAYED"),
+    ]

@@ -114,6 +114,9 @@ def test_at_05_at_29_reference_plan_c_plus_a_is_split_and_b_blocked_by_v06(
     assert failed(ctx) == {"V-06/B"}  # option B blocked; not chosen, so the plan stands
     assert Decimal(result["confidence"]) == Decimal("0.98")  # BR-18: 0.5 + 0.3 + 0.2 x 0.9
     assert result["tier"] == 2
+    plan = ControlStore(ctx.dynamodb, ENV).get(CASE, "PLAN#1") or {}
+    assert plan["projection"]["baseline"]["1010"]["points"]
+    assert plan["projection"]["projection"]["1020"]["points"]
     route = ControlStore(ctx.dynamodb, ENV).get(CASE, "ROUTE#1") or {}
     parts = {tuple(p["options"]): p for p in route["parts"]}
     assert parts[("C",)]["tier"] == 1 and parts[("C",)]["cost"] == 4100

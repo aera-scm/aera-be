@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+from services.api import whatif
 from services.routing.logic import Policy, Route, route
 from services.routing.store import ControlStore
 from services.shared.audit import AuditWriter
@@ -113,7 +114,8 @@ class VerifierService:
             proposed_at=record.proposed_at,
             minimum_cover=self.config.decimal("DONOR_MIN_COVER_DAYS"),
         )
-        self._record(case_id, plan_version, verification)
+        projection = whatif.projection(ctx, case, None)
+        self._record(case_id, plan_version, verification, projection)
         self.cases.transition(
             case_id,
             CaseStatus.VERIFIED,
@@ -172,17 +174,25 @@ class VerifierService:
             "parts": [p.id for p in result.parts],
         }
 
-    def _record(self, case_id: str, version: int, verification: Verification) -> None:
+    def _record(
+        self, case_id: str, version: int, verification: Verification,
+        projection: dict[str, Any],
+    ) -> None:
         record = verification.record
         self.dynamodb.update_item(
             TableName=self._table,
             Key=to_item({"PK": f"CASE#{case_id}", "SK": f"PLAN#{version}"}),
-            UpdateExpression="SET checks = :checks, confidence = :confidence, verifiedAt = :at",
+            UpdateExpression=(
+                "SET checks = :checks, confidence = :confidence, verifiedAt = :at, "
+                "#projection = :projection"
+            ),
+            ExpressionAttributeNames={"#projection": "projection"},
             ExpressionAttributeValues=to_item(
                 {
                     ":checks": [c.model_dump(mode="json", by_alias=True) for c in record.checks],
                     ":confidence": record.confidence or Decimal(0),
                     ":at": record.verified_at.isoformat() if record.verified_at else None,
+                    ":projection": projection,
                 }
             ),
         )

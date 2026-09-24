@@ -5,7 +5,7 @@ from collections.abc import Iterator
 
 import pytest
 from mirror_process import AVAILABLE, MISSING, running_mirror
-from runner import T0, load_cases, metrics, report, run_all, run_case
+from runner import T0, load_cases, metrics, portfolio_results, report, run_all, run_case
 
 pytestmark = pytest.mark.skipif(not AVAILABLE, reason=MISSING)
 
@@ -52,3 +52,13 @@ def test_a_wrong_ground_truth_is_reported_as_a_failure(mirror: str) -> None:
 
     assert not result.passed
     assert sorted(c.name for c in result.checks if not c.ok) == ["tier", "unitsAtRisk"]
+
+
+def test_br_20_full_report_scores_all_known_portfolios() -> None:
+    portfolios = portfolio_results()
+    markdown, data = report([], None, portfolios)
+
+    assert len(portfolios) == 20
+    assert all(p["passed"] for p in portfolios), markdown
+    assert len(data["portfolios"]) == 20
+    assert "Optimiser quality | 100.0% (20/20)" in markdown

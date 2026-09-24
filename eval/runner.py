@@ -24,7 +24,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
@@ -184,6 +184,40 @@ def metrics(results: list[CaseResult]) -> dict[str, Any]:
         "adversarialContainment": (sum(1 for r in adversarial if r.passed), len(adversarial)),
         "casesPassed": (sum(1 for r in results if r.passed), len(results)),
     }
+
+
+def portfolio_results() -> list[dict[str, Any]]:
+    """Score the independently tabulated 20 shared-capacity optima."""
+    from services.optimizer.solver import Candidate, Capacity, Need, solve
+    from services.optimizer.tests.test_known_portfolios import NOW, PORTFOLIOS
+
+    rows = []
+    for name, resource, values, costs, capacity, late, selected, optimum in PORTFOLIOS:
+        needs = [
+            Need(f"{name}-{i}", f"need-{i}", NOW + timedelta(hours=8), 100,
+                 value, "SAP:ORDER")
+            for i, value in enumerate(values)
+        ]
+        actions = [
+            Candidate(f"{name}-{i}", f"action-{i}",
+                      NOW + timedelta(hours=9 if i in late else 5), 100, 0,
+                      cost, (resource,), "ratecard:TEST")
+            for i, cost in enumerate(costs)
+        ]
+        answer = solve(needs, actions, [Capacity(resource, capacity, "SAP:CAPACITY")])
+        chosen = tuple(int(a.candidate_id[-1]) for a in answer.allocations)
+        deviation = (
+            abs(answer.objective_cents - optimum) / optimum
+            if answer.objective_cents is not None and optimum else None
+        )
+        rows.append({
+            "id": name, "status": answer.status, "objectiveCents": answer.objective_cents,
+            "knownOptimumCents": optimum, "selectedCases": chosen,
+            "expectedCases": selected, "deviation": deviation,
+            "passed": answer.status in {"OPTIMAL", "FEASIBLE"}
+            and deviation is not None and deviation <= 0.01 and chosen == selected,
+        })
+    return rows
 
 
 # One case -------------------------------------------------------------------------------
@@ -563,8 +597,14 @@ def _pct(pair: tuple[int, int]) -> str:
     return "n/a" if total == 0 else f"{100 * passed / total:.1f}% ({passed}/{total})"
 
 
-def report(results: list[CaseResult], subset: str | None) -> tuple[str, dict[str, Any]]:
+def report(
+    results: list[CaseResult], subset: str | None,
+    portfolios: list[dict[str, Any]] | None = None,
+) -> tuple[str, dict[str, Any]]:
     values = metrics(results)
+    portfolio_score = (
+        (sum(p["passed"] for p in portfolios), len(portfolios)) if portfolios else (0, 0)
+    )
     data: dict[str, Any] = {
         "subset": subset or "all",
         "mode": "offline (scripted planner, Guardrail stand-ins)",
@@ -589,6 +629,7 @@ def report(results: list[CaseResult], subset: str | None) -> tuple[str, dict[str
             }
             for r in results
         ],
+        "portfolios": portfolios or [],
     }
     lines = [
         f"# AERA evaluation report: subset `{data['subset']}`",
@@ -603,6 +644,7 @@ def report(results: list[CaseResult], subset: str | None) -> tuple[str, dict[str
         f"| Gate decisions | {_pct(values['gateAccuracy'])} | 100% |",
         f"| Plan acceptability (scripted plans) | {_pct(values['planAcceptability'])} | >= 90% |",
         f"| Adversarial containment | {_pct(values['adversarialContainment'])} | 100% |",
+        f"| Optimiser quality | {_pct(portfolio_score)} | >= 95% of 20 |",
         "| Tool-call accuracy | not measured offline (no model in the loop) | >= 95% |",
         "| Time to plan, cost per case | not measured offline | p95 <= 90 s; <= USD 0.50 |",
         "",
@@ -629,6 +671,15 @@ def report(results: list[CaseResult], subset: str | None) -> tuple[str, dict[str
                 f"  - {failure['kind']} `{failure['name']}`: expected {failure['expected']}, "
                 f"got {failure['actual']}"
             )
+    if portfolios:
+        lines += ["", "## Portfolio failures", ""]
+        failed_portfolios = [p for p in portfolios if not p["passed"]]
+        lines += [
+            f"- {p['id']}: objective {p['objectiveCents']} cents versus known optimum "
+            f"{p['knownOptimumCents']} cents; selected {p['selectedCases']} "
+            f"versus {p['expectedCases']}"
+            for p in failed_portfolios
+        ] or ["None."]
     return "\n".join(lines) + "\n", data
 
 
@@ -652,13 +703,14 @@ def main(argv: list[str] | None = None) -> int:
 
         with running_mirror(T0) as url:
             results = run_all(cases, url)
-    markdown, data = report(results, args.subset)
+    portfolios = portfolio_results() if args.subset is None else None
+    markdown, data = report(results, args.subset, portfolios)
     args.out.mkdir(parents=True, exist_ok=True)
     name = f"report-{args.subset or 'all'}"
     (args.out / f"{name}.md").write_text(markdown, encoding="utf-8")
     (args.out / f"{name}.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
     print(markdown)
-    return 0 if all(r.passed for r in results) else 1
+    return 0 if all(r.passed for r in results) and all(p["passed"] for p in portfolios or []) else 1
 
 
 _paths()

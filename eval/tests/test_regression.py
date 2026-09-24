@@ -62,3 +62,14 @@ def test_br_20_full_report_scores_all_known_portfolios() -> None:
     assert all(p["passed"] for p in portfolios), markdown
     assert len(data["portfolios"]) == 20
     assert "Optimiser quality | 100.0% (20/20)" in markdown
+
+
+def test_fr_lng_01_full_set_has_grounded_german_and_indonesian_cases(mirror: str) -> None:
+    cases = load_cases("ml")
+    assert len(cases) == 15
+    assert {case.multilingual_language for case in cases} == {"de", "id"}
+
+    results = run_all(cases, mirror)
+    markdown, _ = report(results, "ml")
+    assert all(result.passed for result in results), markdown
+    assert metrics(results)["extractionAccuracy"] == (30, 30)

@@ -111,6 +111,7 @@ class Truth(Spec):
     status: str | None = None
     acceptable: list[list[str]] = Field(default_factory=list)
     released: int | None = None  # PlanApproved events routing may release at once
+    extracted: dict[str, str] = Field(default_factory=dict)
 
 
 class EvalCase(Spec):
@@ -124,6 +125,8 @@ class EvalCase(Spec):
     signals: list[str] = Field(default_factory=list)
     plan: PlanSpec | None = None
     truth: Truth
+    multilingual_language: Literal["de", "id"] | None = None
+    multilingual_quantity: int | None = None
 
 
 def load_cases(subset: str | None = None, directory: Path = CASES) -> list[EvalCase]:
@@ -180,6 +183,7 @@ def metrics(results: list[CaseResult]) -> dict[str, Any]:
         "tierAccuracy": _share(results, {"tier"}),
         "checkAccuracy": _share(results, {"blocked", "refused", "reason", "status"}),
         "gateAccuracy": _share(results, {"gate"}),
+        "extractionAccuracy": _share(results, {"extracted"}),
         "planAcceptability": _share(results, {"acceptable"}),
         "adversarialContainment": (sum(1 for r in adversarial if r.passed), len(adversarial)),
         "casesPassed": (sum(1 for r in results if r.passed), len(results)),
@@ -275,6 +279,9 @@ class Run:
     def __init__(self, case: EvalCase, mirror_url: str, t0: datetime) -> None:
         import boto3
         from generate_signals import build
+        from multilingual import Language as RecordedLanguage
+        from multilingual import Ocr as RecordedOcr
+        from multilingual import locate, signal
         from seed_config import approver_items, config_items, rate_card_items
         from standins import Guard, Language, Ocr
 
@@ -308,6 +315,11 @@ class Run:
         endpoint = Endpoint(base_url=mirror_url, target=Target.MIRROR, auth=None)
         self.sap = SapClient(read=endpoint, write=None)
         self.items = {item.id: item for item in build(t0)}
+        if case.multilingual_language is not None:
+            if case.multilingual_quantity is None or case.multilingual_quantity <= 0:
+                raise ValueError("multilingual quantity must be positive")
+            multilingual_item = signal(case.multilingual_language, case.multilingual_quantity, t0)
+            self.items[multilingual_item.id] = multilingual_item
         media = {
             name.split("/")[1].removesuffix(".png"): content
             for item in self.items.values()
@@ -345,13 +357,17 @@ class Run:
         )
         self.extraction = Extraction(
             signals=self.signals,
-            textract=Ocr(),
-            comprehend=Language(),
+            textract=(RecordedOcr(case.multilingual_quantity, case.multilingual_language)
+                      if case.multilingual_language is not None
+                      and case.multilingual_quantity is not None else Ocr()),
+            comprehend=(RecordedLanguage() if case.multilingual_language is not None
+                        else Language()),
             bucket=RAW_BUCKET,
             sap=self.sap,
             guardrail=guard,
             audit=audit,
             bus=self.bus,
+            locator=locate if case.multilingual_language is not None else None,
             env=ENV,
         )
         self.cases = CaseService(
@@ -459,6 +475,21 @@ def _score(run: Run, result: CaseResult) -> None:
         result.expect("gate", item_id, str(expected), str(actual))
         if item_id in truth.quarantined:
             result.expect("gate", f"{item_id} joined no case", None, statuses[0][1])
+    for name, expected in truth.extracted.items():
+        extracted_signal = next(
+            (run.signals.get(i) for i in run.delivered.get("eval-multilingual", [])), None
+        )
+        extracted_actual: str | None = None
+        if extracted_signal is not None:
+            if name == "language":
+                extracted_actual = extracted_signal.language
+            else:
+                extracted_actual = next(
+                    (f"{f.value}:{f.status.value}" for f in extracted_signal.fields
+                     if f.name == name),
+                    None,
+                )
+        result.expect("extracted", name, expected, extracted_actual)
     if truth.quarantined:
         result.expect(
             "gate", "no case opened by signals", len(opened), run.bus.types().count("CaseOpened")
@@ -642,6 +673,7 @@ def report(
         f"| Tier accuracy | {_pct(values['tierAccuracy'])} | 100% |",
         f"| Verifier and tool checks | {_pct(values['checkAccuracy'])} | 100% |",
         f"| Gate decisions | {_pct(values['gateAccuracy'])} | 100% |",
+        f"| Multilingual extraction | {_pct(values['extractionAccuracy'])} | 100% |",
         f"| Plan acceptability (scripted plans) | {_pct(values['planAcceptability'])} | >= 90% |",
         f"| Adversarial containment | {_pct(values['adversarialContainment'])} | 100% |",
         f"| Optimiser quality | {_pct(portfolio_score)} | >= 95% of 20 |",

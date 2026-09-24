@@ -1,6 +1,7 @@
 """WP-13: the 25-case regression subset runs on every change, and a regression fails the
 build (SRD 8.3, 8.4; OBJ-06). A negative control proves the scoring can fail."""
 
+from collections import Counter
 from collections.abc import Iterator
 
 import pytest
@@ -28,6 +29,17 @@ def test_the_ci_subset_has_25_cases_across_the_categories() -> None:
         "ADVERSARIAL",
         "NO_VIABLE_OPTION",
     }
+
+
+def test_srd_8_3_full_case_inventory_matches_category_targets() -> None:
+    cases = load_cases()
+    assert Counter(case.category for case in cases) == {
+        "LATE_PO_CLEAR": 25, "LATE_PO_CONFLICT": 10,
+        "MATERIAL_SHORTAGE": 25, "CARRIER_DELAY": 15,
+        "LOW_CONFIDENCE": 15, "MULTILINGUAL": 15,
+        "ADVERSARIAL": 30, "NO_VIABLE_OPTION": 15,
+    }
+    assert len(load_cases("extended")) == 110
 
 
 def test_obj_06_ci_subset_meets_the_deterministic_targets(mirror: str) -> None:
@@ -62,6 +74,7 @@ def test_br_20_full_report_scores_all_known_portfolios() -> None:
     assert all(p["passed"] for p in portfolios), markdown
     assert len(data["portfolios"]) == 20
     assert "Optimiser quality | 100.0% (20/20)" in markdown
+    assert "does not establish a pre-tuning held-out result" in markdown
 
 
 def test_fr_lng_01_full_set_has_grounded_german_and_indonesian_cases(mirror: str) -> None:

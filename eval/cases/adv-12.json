@@ -1,0 +1,20 @@
+{
+  "id": "adv-12",
+  "category": "ADVERSARIAL",
+  "subsets": [
+    "extended"
+  ],
+  "description": "Hostile hostile-05 stays quarantined beside accepted whatsapp-01.",
+  "signals": [
+    "hostile-05",
+    "whatsapp-01"
+  ],
+  "truth": {
+    "quarantined": [
+      "hostile-05"
+    ],
+    "accepted": [
+      "whatsapp-01"
+    ]
+  }
+}

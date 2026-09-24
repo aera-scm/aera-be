@@ -1,0 +1,74 @@
+{
+  "id": "cd-05",
+  "category": "CARRIER_DELAY",
+  "subsets": [
+    "extended"
+  ],
+  "description": "Carrier ETA corroborates recovery; transfer 235 units.",
+  "signals": [
+    "email-01",
+    "whatsapp-01",
+    "carrier-01",
+    "carrier-02"
+  ],
+  "plan": {
+    "options": [
+      {
+        "id": "A",
+        "name": "Air freight partial",
+        "actionType": "AIR_FREIGHT",
+        "qtyField": {
+          "signal": "whatsapp-01",
+          "field": "QUANTITY"
+        }
+      },
+      {
+        "id": "B",
+        "name": "Alternate supplier",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "params": {
+          "supplierId": "1000871",
+          "qty": 800
+        }
+      },
+      {
+        "id": "C",
+        "name": "Transfer 235 units from 1020",
+        "actionType": "STO",
+        "params": {
+          "fromPlant": "1020",
+          "qty": 235
+        }
+      }
+    ],
+    "chosen": [
+      "C"
+    ],
+    "rationale": "Transfer from 1020 until the air shipment lands.",
+    "confirm": [
+      {
+        "signal": "whatsapp-01",
+        "field": "QUANTITY"
+      }
+    ],
+    "recovery": {
+      "signal": "carrier-02",
+      "field": "ETA"
+    }
+  },
+  "truth": {
+    "figures": {
+      "hoursToStockout": 6.2,
+      "unitsAtRisk": 890,
+      "rarUsd": 1600000,
+      "lineStopHours": 17.8
+    },
+    "blocked": {
+      "B": [
+        "V-06"
+      ]
+    },
+    "tier": 1,
+    "status": "AUTO_APPROVED"
+  }
+}

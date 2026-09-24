@@ -1,0 +1,73 @@
+{
+  "id": "lpcf-07",
+  "category": "LATE_PO_CONFLICT",
+  "subsets": [
+    "extended"
+  ],
+  "description": "SAP order quantity overrides conflicting photo; transfer 400 units.",
+  "signals": [
+    "email-01",
+    "whatsapp-01",
+    "carrier-01"
+  ],
+  "plan": {
+    "options": [
+      {
+        "id": "A",
+        "name": "Air freight partial",
+        "actionType": "AIR_FREIGHT",
+        "qtyField": {
+          "signal": "whatsapp-01",
+          "field": "QUANTITY"
+        }
+      },
+      {
+        "id": "B",
+        "name": "Alternate supplier",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "params": {
+          "supplierId": "1000871",
+          "qty": 800
+        }
+      },
+      {
+        "id": "C",
+        "name": "Transfer 400 units from 1020",
+        "actionType": "STO",
+        "params": {
+          "fromPlant": "1020",
+          "qty": 400
+        }
+      }
+    ],
+    "chosen": [
+      "C"
+    ],
+    "rationale": "Transfer from 1020.",
+    "recovery": {
+      "signal": "carrier-01",
+      "field": "ETA"
+    }
+  },
+  "truth": {
+    "discrepancies": [
+      "QUANTITY"
+    ],
+    "refused": [
+      "A"
+    ],
+    "figures": {
+      "hoursToStockout": 6.2,
+      "unitsAtRisk": 1240,
+      "rarUsd": 4720000,
+      "lineStopHours": 24.8
+    },
+    "blocked": {
+      "B": [
+        "V-06"
+      ]
+    },
+    "tier": 1,
+    "status": "AUTO_APPROVED"
+  }
+}

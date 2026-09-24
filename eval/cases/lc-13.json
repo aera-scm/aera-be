@@ -1,0 +1,64 @@
+{
+  "id": "lc-13",
+  "category": "LOW_CONFIDENCE",
+  "subsets": [
+    "extended"
+  ],
+  "description": "Unconfirmed photo quantity is refused; transfer 500 SAP-backed units.",
+  "signals": [
+    "email-01",
+    "whatsapp-01",
+    "carrier-01"
+  ],
+  "plan": {
+    "options": [
+      {
+        "id": "A",
+        "name": "Air freight partial",
+        "actionType": "AIR_FREIGHT",
+        "qtyField": {
+          "signal": "whatsapp-01",
+          "field": "QUANTITY"
+        }
+      },
+      {
+        "id": "B",
+        "name": "Alternate supplier",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "params": {
+          "supplierId": "1000871",
+          "qty": 800
+        }
+      },
+      {
+        "id": "C",
+        "name": "Transfer 500 units from 1020",
+        "actionType": "STO",
+        "params": {
+          "fromPlant": "1020",
+          "qty": 500
+        }
+      }
+    ],
+    "chosen": [
+      "C"
+    ],
+    "rationale": "Transfer from 1020.",
+    "recovery": {
+      "signal": "carrier-01",
+      "field": "ETA"
+    }
+  },
+  "truth": {
+    "refused": [
+      "A"
+    ],
+    "blocked": {
+      "B": [
+        "V-06"
+      ]
+    },
+    "tier": 1,
+    "status": "AUTO_APPROVED"
+  }
+}

@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from services.lab.delivery import ChannelReplay
 from services.lab.scenario import (
     CONTACTS,
     HOSTILE,
@@ -74,6 +75,7 @@ class Lab:
     dynamodb: Any
     intake: Intake
     mirror_patch: Callable[[list[dict[str, object]]], None]
+    delivery: ChannelReplay | None = None
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     env: str = "dev"
 
@@ -96,13 +98,14 @@ class Lab:
             "SK": "META",
             "runId": run_id,
             "synthetic": True,
-            "deliveryMode": "internal-replay",
+            "deliveryMode": "channel-replay" if self.delivery else "internal-replay",
             "parameters": params.model_dump(mode="json", by_alias=True),
             "poNumber": po,
             "createdAt": now.isoformat(),
             "status": "PREPARING",
             "outcome": "IN_PROGRESS",
             "signalIds": [],
+            "receiptKeys": [],
             "caseId": None,
         }
         self.dynamodb.put_item(
@@ -119,24 +122,32 @@ class Lab:
         try:
             self.mirror_patch(mirror_changes(params, now))
             artifacts = generate(params, now, run_id)
-            inbound = self._inbound(params, artifacts, supplier, now, run_id)
-            main = self.intake.receive(inbound)
-            ids = [main.signal_id]
-            if artifacts.hostile_email is not None:
-                hostile = self.intake.receive(
-                    Inbound(
-                        channel=SignalChannel.EMAIL,
-                        sender_id=CONTACTS[supplier][0],
-                        body=artifacts.hostile_email,
-                        content_type="message/rfc822",
-                        dedup_key=f"lab-{run_id}-hostile",
-                        normalized_text=HOSTILE,
-                        po_number=po,
-                        material=params.material,
-                        received_at=now,
+            ids: list[str] = []
+            receipts: list[dict[str, str]] = []
+            if self.delivery:
+                receipts = [
+                    {"channel": channel, "dedupKey": dedup}
+                    for channel, dedup in self.delivery.deliver(params, artifacts, run_id, now)
+                ]
+            else:
+                inbound = self._inbound(params, artifacts, supplier, now, run_id)
+                main = self.intake.receive(inbound)
+                ids = [main.signal_id]
+                if artifacts.hostile_email is not None:
+                    hostile = self.intake.receive(
+                        Inbound(
+                            channel=SignalChannel.EMAIL,
+                            sender_id=CONTACTS[supplier][0],
+                            body=artifacts.hostile_email,
+                            content_type="message/rfc822",
+                            dedup_key=f"lab-{run_id}-hostile",
+                            normalized_text=HOSTILE,
+                            po_number=po,
+                            material=params.material,
+                            received_at=now,
+                        )
                     )
-                )
-                ids.append(hostile.signal_id)
+                    ids.append(hostile.signal_id)
         except Exception:
             self._save(run_id, {"status": "FAILED", "outcome": "DELIVERY_FAILED"})
             self.audit.record(
@@ -148,12 +159,12 @@ class Lab:
             raise LabError(
                 "Lab run failed before signal delivery; inspect services and reset Mirror"
             ) from None
-        self._save(run_id, {"status": "SUBMITTED", "signalIds": ids})
+        self._save(run_id, {"status": "SUBMITTED", "signalIds": ids, "receiptKeys": receipts})
         self.audit.record(
             f"LAB#{run_id}",
             "LAB_SUBMITTED",
             actor="system",
-            payload={"signalIds": ids, "deliveryMode": "internal-replay"},
+            payload={"signalIds": ids, "deliveryMode": record["deliveryMode"]},
         )
         return self.get(run_id)
 
@@ -171,7 +182,7 @@ class Lab:
                 attachments=(
                     Attachment(f"confirmation-{po}.pdf", artifacts.pdf, "application/pdf"),
                 ),
-                normalized_text=f"Supplier update PO {po} {params.material}",
+                normalized_text=artifacts.text,
                 po_number=po,
                 material=params.material,
                 dedup_key=f"lab-{run_id}-email",
@@ -184,7 +195,7 @@ class Lab:
                 body=artifacts.photo,
                 content_type="image/png",
                 attachments=(Attachment(f"confirmation-{po}.png", artifacts.photo, "image/png"),),
-                normalized_text=f"PO {po} {params.material} delivery update",
+                normalized_text=artifacts.text,
                 po_number=po,
                 material=params.material,
                 dedup_key=f"lab-{run_id}-photo",
@@ -230,17 +241,23 @@ class Lab:
         row.pop("SK", None)
         if row["status"] != "SUBMITTED":
             return row
-        signals = [self.signals.get(signal_id) for signal_id in row["signalIds"]]
-        main = signals[0] if signals else None
+        resolved = self._resolved_signals(row)
+        ids = [signal.signal_id for signal in resolved if signal]
+        main = resolved[0] if resolved else None
         case_id = main.case_id if main else None
         case = self.cases.get(case_id) if case_id else None
-        hostile = signals[1] if len(signals) > 1 else None
+        hostile = resolved[1] if len(resolved) > 1 else None
         outcome = "IN_PROGRESS"
         if main and main.status is SignalStatus.QUARANTINED:
             outcome = "SIGNAL_BLOCKED"
+        elif hostile and hostile.status is SignalStatus.ACCEPTED:
+            outcome = "HOSTILE_NOT_BLOCKED"
+        elif hostile and hostile.status is SignalStatus.RECEIVED:
+            outcome = "IN_PROGRESS"
         elif case and case.status in TERMINAL:
             outcome = "RESOLVED" if case.status is CaseStatus.CLOSED else "ESCALATED"
         updates: dict[str, Any] = {
+            "signalIds": ids,
             "caseId": case_id,
             "outcome": outcome,
             "hostileBlocked": hostile.status is SignalStatus.QUARANTINED if hostile else None,
@@ -263,9 +280,10 @@ class Lab:
                     ),
                 )
         if updates != {key: row.get(key) for key in updates}:
+            changed_outcome = outcome != row.get("outcome")
             self._save(run_id, updates)
             row.update(updates)
-            if outcome != "IN_PROGRESS":
+            if outcome != "IN_PROGRESS" and changed_outcome:
                 self.audit.record(
                     f"LAB#{run_id}",
                     "LAB_OUTCOME",
@@ -273,6 +291,21 @@ class Lab:
                     payload={"outcome": outcome, "caseId": case_id},
                 )
         return row
+
+    def _resolved_signals(self, row: dict[str, Any]) -> list[Any]:
+        receipts = row.get("receiptKeys") or []
+        if not receipts:
+            return [self.signals.get(signal_id) for signal_id in row["signalIds"]]
+        resolved: list[Any] = []
+        for receipt in receipts:
+            key = f"INTAKE#{receipt['channel']}#{receipt['dedupKey']}"
+            item = self.dynamodb.get_item(
+                TableName=table_name("idempotency", self.env),
+                Key={"PK": {"S": key}},
+                ConsistentRead=True,
+            ).get("Item")
+            resolved.append(self.signals.get(item["signalId"]["S"]) if item else None)
+        return resolved
 
     def list(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []

@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from aws_cdk import Stack, assertions
 
 from infra.app import DataSettings, build_app
@@ -53,3 +54,31 @@ def test_fr_int_agentcore_runtimes_require_scoped_oauth_client() -> None:
         if asset["source"]["dockerFile"] == "services/interop/Dockerfile"
     ]
     assert len(images) == 1 and images[0]["source"]["platform"] == "linux/arm64"
+
+
+def test_fr_lab_02_channel_replay_requires_recorded_media_and_scoped_secrets() -> None:
+    with pytest.raises(ValueError, match="recorded-media"):
+        build_app(
+            DataSettings(
+                env_name="dev", owner="synthetic-owner", lab_delivery="channel-replay"
+            )
+        )
+    app = build_app(
+        DataSettings(
+            env_name="dev",
+            owner="synthetic-owner",
+            lab_delivery="channel-replay",
+            whatsapp_media="replay",
+        )
+    )
+    template = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-edge")))
+    api = next(
+        row["Properties"]
+        for row in template.find_resources("AWS::Lambda::Function").values()
+        if row["Properties"]["FunctionName"] == "aera-dev-api"
+    )
+    variables = api["Environment"]["Variables"]
+    assert variables["AERA_LAB_DELIVERY"] == "channel-replay"
+    assert variables["AERA_WHATSAPP_MEDIA"] == "replay"
+    policies = json.dumps(template.find_resources("AWS::IAM::Policy"))
+    assert "channels/whatsapp" in policies and "channels/carrier-webhook" in policies

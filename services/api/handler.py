@@ -28,6 +28,7 @@ from services.api import whatif
 from services.api.admin import Admin, AdminError
 from services.api.chat import Chat
 from services.interop.logic import InteropRefused, authorize, rate_limit
+from services.lab.delivery import ChannelReplay
 from services.lab.service import Lab, LabError, mirror_patch_via
 from services.reporting.decision import RecordUnavailable, collect, render_html, render_pdf
 from services.reporting.metrics import kpis
@@ -833,6 +834,22 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         sap = runtime.sap_client()
         lab_endpoint = sap.write
         auth = lab_endpoint.auth if lab_endpoint else None
+        delivery_mode = os.environ.get("AERA_LAB_DELIVERY", "internal-replay")
+        if delivery_mode not in {"internal-replay", "channel-replay"}:
+            raise ValueError("AERA_LAB_DELIVERY must be internal-replay or channel-replay")
+        if delivery_mode == "channel-replay" and os.environ.get("AERA_WHATSAPP_MEDIA") != "replay":
+            raise ValueError("channel-replay requires AERA_WHATSAPP_MEDIA=replay")
+        channel_delivery = (
+            ChannelReplay(
+                s3=runtime.client("s3"),
+                raw_bucket=runtime.raw_bucket(),
+                api_url=lambda: runtime.parameter("API_URL"),
+                whatsapp_secret=lambda: runtime.secret("channels/whatsapp")["appSecret"],
+                carrier_key=lambda: runtime.secret("channels/carrier-webhook")["1000950"],
+            )
+            if delivery_mode == "channel-replay"
+            else None
+        )
         _api = Api(
             dynamodb=dynamodb,
             intake=intake,
@@ -848,6 +865,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 mirror_patch=mirror_patch_via(
                     lab_endpoint.base_url, auth.apply if auth else (lambda headers: None)
                 ),
+                delivery=channel_delivery,
                 env=runtime.env(),
             )
             if lab_endpoint

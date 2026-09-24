@@ -45,6 +45,7 @@ class DataSettings:
     inbound_recipients: tuple[str, ...] = ()
     whatsapp_media: str = "graph"
     agent_card_url: str | None = None
+    lab_delivery: str = "internal-replay"
 
 
 def _optional(environ: Mapping[str, str], name: str) -> str | None:
@@ -75,6 +76,7 @@ def data_settings_from_environment(environ: Mapping[str, str]) -> DataSettings:
         inbound_recipients=_list(environ, "AERA_INBOUND_RECIPIENTS"),
         whatsapp_media=_optional(environ, "AERA_WHATSAPP_MEDIA") or "graph",
         agent_card_url=_optional(environ, "AERA_AGENT_CARD_URL"),
+        lab_delivery=_optional(environ, "AERA_LAB_DELIVERY") or "internal-replay",
     )
 
 
@@ -132,6 +134,7 @@ def build_app(settings: DataSettings) -> App:
             console_origins=list(settings.console_origins),
             inbound_recipients=list(settings.inbound_recipients),
             whatsapp_media=settings.whatsapp_media,
+            lab_delivery=settings.lab_delivery,
             **common,
         ),
         "gate": GateStack(

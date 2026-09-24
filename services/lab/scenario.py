@@ -64,6 +64,7 @@ class Parameters(BaseModel):
 
 @dataclass(frozen=True)
 class Artifacts:
+    text: str
     email: bytes
     pdf: bytes
     photo: bytes
@@ -170,12 +171,10 @@ def _text(params: Parameters, po: str, date: str) -> str:
                 "{qty} units now arrive {date}."
             ),
             "ID": (
-                "Pengangkut terlambat. Pesanan {po}, material {material}: "
-                "{qty} unit tiba {date}."
+                "Pengangkut terlambat. Pesanan {po}, material {material}: {qty} unit tiba {date}."
             ),
             "DE": (
-                "Transportverzug. Bestellung {po}, Material {material}: "
-                "{qty} Stueck kommen {date}."
+                "Transportverzug. Bestellung {po}, Material {material}: {qty} Stueck kommen {date}."
             ),
         },
     }
@@ -258,6 +257,7 @@ def generate(params: Parameters, now: datetime, run_id: str) -> Artifacts:
         "senderPhone": phone,
     }
     return Artifacts(
+        text,
         mail(text, attach=True),
         pdf,
         photo,

@@ -62,10 +62,15 @@ class EdgeStack(Stack):
         console_origins: list[str] | None = None,
         inbound_recipients: list[str] | None = None,
         whatsapp_media: str = "graph",
+        lab_delivery: str = "internal-replay",
         **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
         require_deployable_environment(env_name)
+        if lab_delivery not in {"internal-replay", "channel-replay"}:
+            raise ValueError("unknown Lab delivery mode")
+        if lab_delivery == "channel-replay" and whatsapp_media != "replay":
+            raise ValueError("Lab channel replay needs the recorded-media webhook adapter")
         raw = data.buckets["raw"]
         tables = data.tables
 
@@ -93,8 +98,17 @@ class EdgeStack(Stack):
         # The Mirror client serves the FR-ADM-03 reset.
         api_fn = function(
             "api",
-            environment={**environment, "AERA_EXECUTION_STATE_MACHINE_ARN": execution_arn},
-            secrets=("sap/mirror-oauth-client",),
+            environment={
+                **environment,
+                "AERA_EXECUTION_STATE_MACHINE_ARN": execution_arn,
+                "AERA_LAB_DELIVERY": lab_delivery,
+                "AERA_WHATSAPP_MEDIA": whatsapp_media,
+            },
+            secrets=(
+                ("sap/mirror-oauth-client", "channels/whatsapp", "channels/carrier-webhook")
+                if lab_delivery == "channel-replay"
+                else ("sap/mirror-oauth-client",)
+            ),
         )
         api_fn.add_to_role_policy(
             iam.PolicyStatement(actions=["states:StartExecution"], resources=[execution_arn])

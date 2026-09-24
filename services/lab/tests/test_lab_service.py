@@ -79,11 +79,24 @@ def test_fr_lab_04_run_reaches_gate_and_records_case_outcome(
         actor="system",
     )
     signals.save(main.model_copy(update={"status": SignalStatus.ACCEPTED, "case_id": case_id}))
+    waiting = json.loads(
+        api.handle(request("GET", "/lab/runs/{id}", "admin", run_id=row["runId"]))["body"]
+    )
+    assert waiting["outcome"] == "IN_PROGRESS" and waiting["hostileBlocked"] is False
+    signals.save(hostile.model_copy(update={"status": SignalStatus.ACCEPTED}))
+    unsafe = json.loads(
+        api.handle(request("GET", "/lab/runs/{id}", "admin", run_id=row["runId"]))["body"]
+    )
+    assert unsafe["outcome"] == "HOSTILE_NOT_BLOCKED"
     signals.save(hostile.model_copy(update={"status": SignalStatus.QUARANTINED}))
     result = api.handle(request("GET", "/lab/runs/{id}", "admin", run_id=row["runId"]))
     final = json.loads(result["body"])
     assert final["outcome"] == "RESOLVED" and final["hostileBlocked"] is True
     assert final["caseId"] == case_id
+    assert lab.get(row["runId"])["outcome"] == "RESOLVED"
+    events = lab.audit.events(f"LAB#{row['runId']}")
+    outcomes = [event for event in events if event.type == "LAB_OUTCOME"]
+    assert len(outcomes) == 2
     listed = json.loads(api.handle(request("GET", "/lab/runs", "admin"))["body"])
     assert listed[0]["outcome"] == "RESOLVED"
     assert (

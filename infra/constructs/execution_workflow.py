@@ -98,7 +98,12 @@ def definition(function_arn: str) -> dict[str, Any]:
                 ],
                 "Default": "MarkFailedRolledBack",
             },
-            "Notify": _task(function_arn, "Notify", "ScheduleGoodsReceiptCheck"),
+            "Notify": _task(
+                function_arn,
+                "Notify",
+                "ScheduleGoodsReceiptCheck",
+                {"documents.$": "$.execute.value.documents"},
+            ),
             "ScheduleGoodsReceiptCheck": _task(
                 function_arn,
                 "ScheduleGoodsReceiptCheck",

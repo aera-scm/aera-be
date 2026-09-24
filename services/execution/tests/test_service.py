@@ -272,7 +272,7 @@ def run_state_machine(world: dict[str, Any], part: str) -> list[str]:
     result = dispatch(service, {**event, "step": "Execute"})
     visited.append("Execute")
     if result["outcome"] == "COMPLETED":
-        dispatch(service, {**event, "step": "Notify"})
+        dispatch(service, {**event, "step": "Notify", "documents": result["documents"]})
         dispatch(
             service,
             {
@@ -314,7 +314,8 @@ def test_at_29_urgent_sto_part_executes_while_air_freight_waits(
         "PRODUCTION_PLANNING_UPDATE",
     ]
     [schedule] = world["scheduler"].schedules.values()
-    assert schedule["ScheduleExpression"] == "at(2026-10-05T15:00:00)"  # T0 + 5 h + 2 h grace
+    # BR-14: T0 + 5 h arrival + 2 h grace, capped at 1 h before the 14:12 stock-out.
+    assert schedule["ScheduleExpression"] == "at(2026-10-05T13:12:00)"
 
 
 def test_at_06_approved_part_writes_split_and_booking_and_reaches_monitoring(

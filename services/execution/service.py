@@ -292,14 +292,21 @@ class ExecutionService:
             return False
         return True
 
-    def notify(self, case_id: str, part_id: str) -> dict[str, Any]:
+    def notify(
+        self, case_id: str, part_id: str, documents: list[Any] | None = None
+    ) -> dict[str, Any]:
         """FR-COM-01: supplier, customer service and production planning; the notifier
         (WP-7) resolves recipients from SAP master data only (BR-03)."""
         for role, template in NOTIFICATIONS:
             self._emit(
                 "NotificationRequested",
                 case_id,
-                {"recipientRole": role, "templateId": template, "planPartId": part_id},
+                {
+                    "recipientRole": role,
+                    "templateId": template,
+                    "planPartId": part_id,
+                    "documents": list(documents or []),
+                },
             )
         return {"notified": len(NOTIFICATIONS)}
 
@@ -308,7 +315,12 @@ class ExecutionService:
     ) -> dict[str, Any]:
         """FR-MON-01: one-shot schedule at expected arrival + grace (REOPEN_GRACE_HOURS)."""
         grace = timedelta(hours=float(self.config.decimal("REOPEN_GRACE_HOURS")))
-        due = datetime.fromisoformat(expected_arrival) + grace
+        arrival = datetime.fromisoformat(expected_arrival)
+        due = arrival + grace
+        case = self.cases.get(case_id)
+        if case is not None and case.stockout_at is not None:
+            # BR-14: reopen no later than 1 h before the projected stock-out.
+            due = max(arrival, min(due, case.stockout_at - timedelta(hours=1)))
         name = f"aera-{self.env or 'dev'}-gr-{case_id}-{part_id[:12]}"
         detail = {"caseId": case_id, "planPartId": part_id, "expected": expected_arrival}
         if self.scheduler is not None:
@@ -440,7 +452,7 @@ def dispatch(service: ExecutionService, event: dict[str, Any]) -> dict[str, Any]
     if step == "Execute":
         return service.execute(case_id, part_id)
     if step == "Notify":
-        return service.notify(case_id, part_id)
+        return service.notify(case_id, part_id, list(event.get("documents") or []))
     if step == "ScheduleGoodsReceiptCheck":
         return service.schedule_goods_receipt_check(case_id, part_id, str(event["expectedArrival"]))
     if step == "MarkMonitoring":

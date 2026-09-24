@@ -65,3 +65,7 @@ warn_required_dynamic_aliases = true
 
 [tool.coverage.run]
 omit = ["*/tests/*"]
+
+[tool.ruff.lint.per-file-ignores]
+# Pytest fixtures imported from another test module are "redefined" as parameters.
+"services/monitor/tests/*" = ["F401", "F811"]

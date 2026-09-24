@@ -180,5 +180,7 @@ test("business partner grouping tells suppliers from carriers for sender verific
   const partners = await all("API_BUSINESS_PARTNER/A_BusinessPartner?$select=BusinessPartner,BusinessPartnerGrouping");
   const grouping = Object.fromEntries(partners.map((p) => [p.BusinessPartner, p.BusinessPartnerGrouping]));
 
-  assert.deepEqual(grouping, { 1000234: "SUPL", 1000871: "SUPL", 1000950: "CARR" });
+  assert.deepEqual(grouping, {
+    1000234: "SUPL", 1000871: "SUPL", 1000950: "CARR", 9000001: "INTL", 9000002: "INTL",
+  });
 });

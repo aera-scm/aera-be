@@ -150,8 +150,14 @@ def build_app(settings: DataSettings) -> App:
         code=service_code(settings.lambda_bundle),
         **common,
     )
+    stacks["control"] = ControlStack(
+        app,
+        f"aera-{env_name}-control",
+        data=data,
+        code=service_code(settings.lambda_bundle),
+        **common,
+    )
     for component, stack_type in (
-        ("control", ControlStack),
         ("interop", InteropStack),
         ("web", WebStack),
         ("observability", ObservabilityStack),

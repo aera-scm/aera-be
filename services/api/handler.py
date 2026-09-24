@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
 import re
 import secrets
 import time
@@ -46,6 +47,7 @@ from services.shared.trace import TraceStore
 COMPONENT = "api"
 READERS = frozenset({"planner", "approver", "admin"})
 PLANNERS = frozenset({"planner", "admin"})
+APPROVERS = frozenset({"approver"})
 TICKET_SECONDS = 60
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 UPLOAD_TYPES = {"application/pdf", "image/jpeg", "image/png", "text/plain"}
@@ -99,6 +101,8 @@ class Api:
     bus: Any
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     env: str | None = None
+    states: Any = None
+    execution_arn: str = ""
 
     def __post_init__(self) -> None:
         self.cases = CaseStore(self.dynamodb, self.env)
@@ -156,6 +160,9 @@ class Api:
         if resource == "/realtime/ticket":
             _require(user, READERS)
             return http.response(201, self.ticket(user))
+        if resource == "/cases/{id}/rollback":
+            _require(user, APPROVERS)
+            return self.rollback(params["id"], user)
         _require(user, PLANNERS)
         body = _json_body(event)
         if resource == "/signals":
@@ -165,6 +172,48 @@ class Api:
         if resource == "/cases/{id}/runs":
             return self.start_run(params["id"], user)
         raise Problem(404, "Not found")
+
+    def rollback(self, case_id: str, user: User) -> dict[str, Any]:
+        """FR-EXE-08, FR-MON-03: an approver rolls back a reopened case's executed plan. The
+        request is audited; the execution workflow performs it; repeating it is harmless."""
+        case = self._case(case_id)
+        if case.status is not CaseStatus.REOPENED:
+            raise Problem(409, "Rollback not possible", f"case is {case.status.value}")
+        if self.states is None or not self.execution_arn:
+            raise Problem(503, "Execution workflow is not configured in this environment")
+        try:
+            self.dynamodb.put_item(
+                TableName=self._cases_table,
+                Item=to_item(
+                    {
+                        "PK": f"CASE#{case_id}",
+                        "SK": f"ROLLBACK#{case.plan_version}",
+                        "status": "REQUESTED",
+                        "actor": f"user:{user.id}",
+                        "requestedAt": self.clock().isoformat(),
+                    }
+                ),
+                ConditionExpression="attribute_not_exists(PK)",
+            )
+            self.audit.record(
+                f"CASE#{case_id}",
+                "ROLLBACK_REQUESTED",
+                actor=f"user:{user.id}",
+                case_id=case_id,
+                payload={"planVersion": case.plan_version},
+            )
+        except self.dynamodb.exceptions.ConditionalCheckFailedException:
+            pass  # already requested: start (or find) the same workflow execution
+        name = f"{case_id}-rollback-v{case.plan_version}"
+        try:
+            self.states.start_execution(
+                stateMachineArn=self.execution_arn,
+                name=name,
+                input=json.dumps({"mode": "rollback", "caseId": case_id}),
+            )
+        except self.states.exceptions.ExecutionAlreadyExists:
+            pass
+        return http.response(202, {"rollback": name})
 
     def start_run(self, case_id: str, user: User) -> dict[str, Any]:
         """NFR-REL-04: returns the run id at once; run-starter starts the run from the event
@@ -463,5 +512,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 component=COMPONENT,
             ),
             bus=bus,
+            states=runtime.client("stepfunctions"),
+            execution_arn=os.environ.get("AERA_EXECUTION_STATE_MACHINE_ARN", ""),
         )
     return _api.handle(event)

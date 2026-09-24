@@ -415,3 +415,66 @@ def test_nfr_rel_04_active_run_refuses_another_start(
     response = api.handle(request("POST", "/cases/{id}/runs", params={"id": case_id}, body={}))
     assert response["statusCode"] == 409
     assert not bus.details("CaseReadyForRun")
+
+
+class States:
+    class exceptions:  # noqa: N801 - mirrors boto3's client.exceptions namespace
+        ExecutionAlreadyExists = type("ExecutionAlreadyExists", (Exception,), {})
+
+    def __init__(self) -> None:
+        self.started: dict[str, dict[str, Any]] = {}
+
+    def start_execution(self, **request: Any) -> dict[str, Any]:
+        if request["name"] in self.started:
+            raise self.exceptions.ExecutionAlreadyExists()
+        self.started[request["name"]] = request
+        return {}
+
+
+def reopened_case(dynamodb: Any) -> str:
+    case_id = make_case(dynamodb, 914, 1, 1, CaseStatus.TRIAGED)
+    store = CaseStore(dynamodb, ENV)
+    for status in (
+        CaseStatus.INVESTIGATING,
+        CaseStatus.PLAN_PROPOSED,
+        CaseStatus.VERIFIED,
+        CaseStatus.AUTO_APPROVED,
+        CaseStatus.EXECUTING,
+        CaseStatus.MONITORING,
+        CaseStatus.REOPENED,
+    ):
+        store.transition(case_id, status, actor="system")
+    return case_id
+
+
+def test_fr_exe_08_approver_rollback_is_audited_and_idempotent(api: Api, dynamodb: Any) -> None:
+    states = States()
+    api.states, api.execution_arn = (
+        states,
+        "arn:aws:states:us-east-1:0:stateMachine:aera-test-execution",
+    )
+    case_id = reopened_case(dynamodb)
+    call = request(
+        "POST", "/cases/{id}/rollback", groups="approver", params={"id": case_id}, body={}
+    )
+
+    first = api.handle(call)
+    second = api.handle(call)
+
+    assert first["statusCode"] == second["statusCode"] == 202
+    [started] = states.started.values()
+    assert json.loads(started["input"]) == {"mode": "rollback", "caseId": case_id}
+    events = AuditWriter(dynamodb, ENV).events(f"CASE#{case_id}")
+    assert [e.type for e in events].count("ROLLBACK_REQUESTED") == 1
+
+
+def test_rollback_needs_an_approver_and_a_reopened_case(api: Api, dynamodb: Any) -> None:
+    api.states, api.execution_arn = States(), "arn"
+    case_id = make_case(dynamodb, 914, 1, 1, CaseStatus.TRIAGED)
+    planner = request("POST", "/cases/{id}/rollback", params={"id": case_id}, body={})
+    approver = request(
+        "POST", "/cases/{id}/rollback", groups="approver", params={"id": case_id}, body={}
+    )
+
+    assert api.handle(planner)["statusCode"] == 403
+    assert api.handle(approver)["statusCode"] == 409

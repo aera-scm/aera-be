@@ -46,15 +46,16 @@ def test_nfr_mnt_02_all_stacks_and_dependencies() -> None:
             "owner": "synthetic-owner",
         }
         template = assertions.Template.from_stack(stack)
-        # M1-M2 build Lambdas in gate, edge and reasoning; M3+ resources do not exist yet.
-        if name not in {"gate", "edge", "reasoning"}:
+        # M1-M3 build Lambdas in gate, edge, reasoning and control; later resources wait.
+        if name not in {"gate", "edge", "reasoning", "control"}:
             template.resource_count_is("AWS::Lambda::Function", 0)
         if name != "edge":
             template.resource_count_is("AWS::ApiGateway::RestApi", 0)
         if name != "reasoning":
             template.resource_count_is("AWS::BedrockAgentCore::Runtime", 0)
+        if name != "control":
+            template.resource_count_is("AWS::StepFunctions::StateMachine", 0)
         for resource in (
-            "AWS::StepFunctions::StateMachine",
             "AWS::CloudFront::Distribution",
             "AWS::KinesisFirehose::DeliveryStream",
         ):
@@ -70,6 +71,7 @@ def test_nfr_mnt_02_all_stacks_and_dependencies() -> None:
             "gate",
             "edge",
             "reasoning",
+            "control",
         }:
             resources = list(artifact.template["Resources"].values())
             assert len(resources) == 1

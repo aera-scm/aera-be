@@ -11,13 +11,14 @@ inbound (SRD 6.10, 6.17, IR-06, IR-07, IR-08, IR-11, NFR-SEC-04).
 
 from typing import Any
 
-from aws_cdk import CfnOutput, Duration, Stack
+from aws_cdk import ArnFormat, CfnOutput, Duration, Stack
 from aws_cdk import aws_apigateway as apigw
 from aws_cdk import aws_apigatewayv2 as apigwv2
 from aws_cdk import aws_apigatewayv2_integrations as integrations
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
+from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_lambda_event_sources as sources
 from aws_cdk import aws_ses as ses
@@ -82,7 +83,20 @@ class EdgeStack(Stack):
             return service.function
 
         environment = {"AERA_RAW_BUCKET": raw.bucket_name}
-        api_fn = function("api", environment=environment)
+        # Named, not referenced: the edge stack must not depend on the control stack (6.16).
+        execution_arn = self.format_arn(
+            service="states",
+            resource="stateMachine",
+            resource_name=f"aera-{env_name}-execution",
+            arn_format=ArnFormat.COLON_RESOURCE_NAME,
+        )
+        api_fn = function(
+            "api",
+            environment={**environment, "AERA_EXECUTION_STATE_MACHINE_ARN": execution_arn},
+        )
+        api_fn.add_to_role_policy(
+            iam.PolicyStatement(actions=["states:StartExecution"], resources=[execution_arn])
+        )
         webhooks = function(
             "webhooks",
             environment={**environment, "AERA_WHATSAPP_MEDIA": whatsapp_media},
@@ -137,6 +151,8 @@ class EdgeStack(Stack):
         case = cases.add_resource("{id}")
         signed(case, "GET")
         signed(case.add_resource("trace"), "GET")
+        signed(case.add_resource("runs"), "POST")
+        signed(case.add_resource("rollback"), "POST")
         signed(
             case.add_resource("fields").add_resource("{fieldId}").add_resource("confirm"), "POST"
         )

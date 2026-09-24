@@ -14,7 +14,6 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-import os
 import re
 import secrets
 import time
@@ -25,14 +24,21 @@ from decimal import Decimal
 from typing import Any
 
 from services.rules.br_13 import board_key, rank_reason
-from services.run_starter.handler import RunStarter
+from services.run_starter.handler import STARTABLE
 from services.shared import http
 from services.shared.audit import AuditWriter
 from services.shared.case_state import TERMINAL
 from services.shared.cases import CaseStore
 from services.shared.dynamo import from_item, table_name, to_item
 from services.shared.intake import Attachment, Inbound, Intake
-from services.shared.models import Case, CaseStatus, FieldStatus, SignalChannel, SignalStatus
+from services.shared.models import (
+    Case,
+    CaseStatus,
+    FieldStatus,
+    SignalChannel,
+    SignalStatus,
+    new_ulid,
+)
 from services.shared.runtime import emit
 from services.shared.signals import SignalStore
 from services.shared.trace import TraceStore
@@ -93,7 +99,6 @@ class Api:
     bus: Any
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     env: str | None = None
-    starter: RunStarter | None = None
 
     def __post_init__(self) -> None:
         self.cases = CaseStore(self.dynamodb, self.env)
@@ -162,14 +167,24 @@ class Api:
         raise Problem(404, "Not found")
 
     def start_run(self, case_id: str, user: User) -> dict[str, Any]:
-        """NFR-REL-04: returns the run id at once; the run itself is asynchronous."""
-        self._case(case_id)
-        if self.starter is None:
-            raise Problem(503, "Agent runs are not configured in this environment")
-        started = self.starter.start(case_id, reason="planner request", actor=f"user:{user.id}")
-        if started.run_id is None:
-            raise Problem(409, "Run not started", started.reason)
-        return http.response(202, {"runId": started.run_id})
+        """NFR-REL-04: returns the run id at once; run-starter starts the run from the event
+        under that id (the edge stack never calls the reasoning stack directly, SRD 6.17)."""
+        case = self._case(case_id)
+        if case.status not in STARTABLE:
+            raise Problem(409, "Run not started", f"case is {case.status.value}")
+        if case.active_run_id:
+            raise Problem(409, "Run not started", "a run is already active")
+        run_id = new_ulid()
+        emit(
+            self.bus,
+            "CaseReadyForRun",
+            {"caseId": case_id, "reason": "planner request", "runId": run_id},
+            component=COMPONENT,
+            case_id=case_id,
+            actor=f"user:{user.id}",
+            environment=self.env,
+        )
+        return http.response(202, {"runId": run_id})
 
     # Reads ------------------------------------------------------------------------------
 
@@ -448,15 +463,5 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 component=COMPONENT,
             ),
             bus=bus,
-            starter=(
-                RunStarter(
-                    dynamodb=dynamodb,
-                    agentcore=runtime.client("bedrock-agentcore"),
-                    runtime_arn=lambda: os.environ["AERA_AGENT_RUNTIME_ARN"],
-                    bus=bus,
-                )
-                if os.environ.get("AERA_AGENT_RUNTIME_ARN")
-                else None
-            ),
         )
     return _api.handle(event)

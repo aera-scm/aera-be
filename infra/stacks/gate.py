@@ -73,6 +73,7 @@ class GateStack(Stack):
                 string_value=value,
                 description=f"SRD 6.23 {key}",
             )
+        self.guardrail_arn = guardrail.attr_guardrail_arn
         apply_guardrail = iam.PolicyStatement(
             actions=["bedrock:ApplyGuardrail"], resources=[guardrail.attr_guardrail_arn]
         )

@@ -101,3 +101,11 @@ def test_unreachable_runtime_releases_the_case_and_reports_the_failure(
 
 def test_cases_in_other_states_are_not_started(dynamodb: Any, bus: RecordingBus) -> None:
     assert starter(dynamodb, bus, FakeAgentCore()).start("EXC-2026-9999", reason="x").run_id is None
+
+
+def test_a_run_id_chosen_by_the_api_is_kept(dynamodb: Any, bus: RecordingBus, case: str) -> None:
+    started = starter(dynamodb, bus, FakeAgentCore()).start(
+        case, reason="planner request", run_id="01J0000000000000000000RUN0", actor="user:u-1"
+    )
+    assert started.run_id == "01J0000000000000000000RUN0"
+    assert bus.details("RunStarted")[0]["actor"] == "user:u-1"

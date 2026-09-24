@@ -140,8 +140,17 @@ def build_app(settings: DataSettings) -> App:
             **common,
         ),
     }
+    gate = stacks["gate"]
+    assert isinstance(gate, GateStack)
+    stacks["reasoning"] = ReasoningStack(
+        app,
+        f"aera-{env_name}-reasoning",
+        data=data,
+        guardrail_arn=gate.guardrail_arn,
+        code=service_code(settings.lambda_bundle),
+        **common,
+    )
     for component, stack_type in (
-        ("reasoning", ReasoningStack),
         ("control", ControlStack),
         ("interop", InteropStack),
         ("web", WebStack),

@@ -207,7 +207,9 @@ provider. Use `existing` only for a provider managed outside this stack.
 Trust permits only `repo:<approved-repository>:ref:refs/heads/main` with audience
 `sts.amazonaws.com`. The deployment role can assume only that qualifier's deploy,
 file-publishing and lookup roles in the current account and approved region,
-read the selected budget, and read the bootstrap version. It cannot bootstrap.
+read the selected budget, and read the bootstrap version. The same scoped
+delegation includes the qualifier's image-publishing role for the ARM64 supervisor
+container. It cannot bootstrap or assume roles from another qualifier or region.
 PR validation has no OIDC permission. No frontend role is provisioned yet.
 
 Before enabling hosted deployment, the account owner must approve a dedicated dev
@@ -234,3 +236,28 @@ It does not bootstrap, provision SAP key values, seed business data, or deploy a
 frontend bundle. Hosted CI, cloud deployment and live SAP evidence remain pending.
 
 Built for the AWS / SAP Agentic AI Hackathon, track: Intelligent Supply Chain.
+
+## Supervisor deployment boundary
+
+The reasoning stack packages each catalogue tool as a separate ARM64 Lambda,
+registers the tools with the IAM-authenticated AgentCore Gateway, and defines the
+supervisor as a Python 3.12 ARM64 container (SRD 6.18). The container build uses
+the frozen uv lockfile and runs as a non-root user. Idle sessions expire after
+15 minutes; maximum lifetime is one hour. Only application source and dependency
+manifests enter the Docker asset, not local configuration, caches or credentials.
+
+CDK builds and publishes the image to the bootstrap ECR repository during the
+existing budget-gated dev deployment. A running Linux Docker engine with ARM64
+build support is required. Synthesis alone neither builds an image nor deploys
+resources. Build the Lambda bundle separately before deployment as before.
+
+The console API emits CaseReadyForRun and returns the chosen run ID; only the
+run-starter invokes AgentCore. Neither runtime nor tool roles can invoke execution
+workflows or send notifications. Model IAM permits direct regional Claude/Nova
+models and explicitly denies inference outside us-east-1; no inference profiles.
+
+Offline tests cover schemas, IAM, packaging, event wiring and scripted reference
+runs. They do not establish a successful image build, ECR publication, live model
+or Gateway invocation, or the required reference-run p95 at most 90 seconds.
+Cloud acceptance requires the approved dev account, budget, model configuration,
+SAP Mirror and CloudFormation execution policy covering the implemented stacks.

@@ -80,10 +80,10 @@ def test_permissions_only_assume_approved_bootstrap_roles_and_read_budget() -> N
         statement for statement in statements if statement["Action"] == ["sts:AssumeRole"]
     )
     encoded = json.dumps(assume["Resource"])
-    for purpose in ("deploy", "file-publishing", "lookup"):
+    for purpose in ("deploy", "file-publishing", "image-publishing", "lookup"):
         assert f"cdk-aeradev-{purpose}-role-123456789012-us-east-1" in encoded
     assert "*" not in encoded
-    assert len(assume["Resource"]) == 3
+    assert len(assume["Resource"]) == 4
     assert "iam:PassRole" not in json.dumps(statements)
     assert "AdministratorAccess" not in json.dumps(result)
     assert "final" not in json.dumps(statements)

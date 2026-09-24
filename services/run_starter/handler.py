@@ -47,7 +47,13 @@ class RunStarter:
         self.runs = RunStore(self.dynamodb, self.env, clock=self.clock)
 
     def start(
-        self, case_id: str, *, reason: str, mode: str = "investigate", actor: str = "system"
+        self,
+        case_id: str,
+        *,
+        reason: str,
+        mode: str = "investigate",
+        actor: str = "system",
+        run_id: str | None = None,
     ) -> Started:
         case = self.cases.get(case_id)
         if case is None:
@@ -56,7 +62,7 @@ class RunStarter:
             case.status, CaseStatus.INVESTIGATING
         ):
             return Started(None, f"case is {case.status.value}")
-        run_id = new_ulid()
+        run_id = run_id or new_ulid()
         if not self.runs.claim(case_id, run_id):
             return Started(None, "a run is already active")
         try:
@@ -126,5 +132,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             bus=runtime.client("events"),
         )
     data = (event.get("detail") or {}).get("data") or {}
-    started = _starter.start(str(data["caseId"]), reason=str(data.get("reason") or "ready"))
+    started = _starter.start(
+        str(data["caseId"]),
+        reason=str(data.get("reason") or "ready"),
+        run_id=data.get("runId"),
+        actor=str(event.get("detail", {}).get("actor") or "system"),
+    )
     return {"runId": started.run_id, "reason": started.reason}

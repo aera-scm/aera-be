@@ -42,11 +42,13 @@ class ServiceFunction(Construct):
         timeout: Duration | None = None,
         reserved_concurrency: int | None = None,
         secrets: tuple[str, ...] = (),
+        module: str | None = None,
+        parameters: tuple[str, ...] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id)
         stack = Stack.of(self)
-        module = component.replace("-", "_")
+        module = module or component.replace("-", "_")
         log_group = logs.LogGroup(
             self,
             "Logs",
@@ -74,16 +76,22 @@ class ServiceFunction(Construct):
             },
             **kwargs,
         )
-        self.function.add_to_role_policy(
-            iam.PolicyStatement(
-                actions=["ssm:GetParameter"],
-                resources=[
-                    stack.format_arn(
-                        service="ssm", resource="parameter", resource_name=f"aera/{env_name}/*"
-                    )
-                ],
-            )
+        # Only the named parameters when given (NFR-SEC-01), otherwise the environment's.
+        names = (
+            [f"aera/{env_name}/{name}" for name in parameters]
+            if parameters is not None
+            else [f"aera/{env_name}/*"]
         )
+        if names:
+            self.function.add_to_role_policy(
+                iam.PolicyStatement(
+                    actions=["ssm:GetParameter"],
+                    resources=[
+                        stack.format_arn(service="ssm", resource="parameter", resource_name=name)
+                        for name in names
+                    ],
+                )
+            )
         if secrets:
             self.function.add_to_role_policy(
                 iam.PolicyStatement(

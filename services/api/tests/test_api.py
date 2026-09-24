@@ -298,31 +298,6 @@ def test_metrics_carry_the_mrp_header_counts(api: Api, dynamodb: Any) -> None:
     }
 
 
-def test_nfr_rel_04_post_runs_returns_a_run_id_at_once(api: Api, dynamodb: Any) -> None:
-    from services.run_starter.handler import RunStarter
-
-    class Runtime:
-        def invoke_agent_runtime(self, **request: Any) -> dict[str, Any]:
-            return {}
-
-    case_id = make_case(dynamodb, 914, 1, 1, CaseStatus.TRIAGED)
-    api.starter = RunStarter(
-        dynamodb=dynamodb, agentcore=Runtime(), runtime_arn=lambda: "arn", bus=api.bus, env=ENV
-    )
-
-    first = api.handle(request("POST", "/cases/{id}/runs", params={"id": case_id}, body={}))
-    second = api.handle(request("POST", "/cases/{id}/runs", params={"id": case_id}, body={}))
-
-    assert first["statusCode"] == 202 and len(body(first)["runId"]) == 26
-    assert second["statusCode"] == 409
-
-
-def test_runs_are_unavailable_without_a_runtime(api: Api, dynamodb: Any) -> None:
-    case_id = make_case(dynamodb, 914, 1, 1, CaseStatus.TRIAGED)
-    response = api.handle(request("POST", "/cases/{id}/runs", params={"id": case_id}, body={}))
-    assert response["statusCode"] == 503
-
-
 def test_uc_05_answering_the_last_question_makes_the_case_ready_for_a_new_run(
     api: Api, dynamodb: Any, intake: Intake, bus: RecordingBus
 ) -> None:
@@ -387,3 +362,56 @@ def test_fr_tri_03_board_rows_explain_their_rank(api: Api, dynamodb: Any) -> Non
 
     assert rows[0]["rankReason"].startswith("EXC-2026-0914 ranks above EXC-2026-0915")
     assert "rankReason" not in rows[1]
+
+
+def test_nfr_rel_04_post_runs_returns_a_run_id_at_once(
+    api: Api, dynamodb: Any, bus: RecordingBus
+) -> None:
+    case_id = make_case(dynamodb, 914, 1, 1, CaseStatus.TRIAGED)
+
+    response = api.handle(request("POST", "/cases/{id}/runs", params={"id": case_id}, body={}))
+
+    assert response["statusCode"] == 202
+    run_id = body(response)["runId"]
+    [ready] = bus.details("CaseReadyForRun")
+    assert ready["data"] == {"caseId": case_id, "reason": "planner request", "runId": run_id}
+    assert ready["actor"] == "user:u-1"
+
+
+def test_runs_are_refused_for_cases_that_cannot_start(api: Api, dynamodb: Any) -> None:
+    case_id = make_case(dynamodb, 914, 1, 1, CaseStatus.RECEIVED)
+    response = api.handle(request("POST", "/cases/{id}/runs", params={"id": case_id}, body={}))
+    assert response["statusCode"] == 409
+
+
+def test_nfr_rel_04_replayed_api_request_emits_one_run_id(
+    api: Api, dynamodb: Any, bus: RecordingBus
+) -> None:
+    case_id = make_case(dynamodb, 914, 1, 1, CaseStatus.TRIAGED)
+    event = request(
+        "POST",
+        "/cases/{id}/runs",
+        params={"id": case_id},
+        body={},
+        headers={"Idempotency-Key": "start-reference-run"},
+    )
+    first = api.handle(event)
+    repeated = api.handle(event)
+    assert first["statusCode"] == repeated["statusCode"] == 202
+    assert body(first) == body(repeated)
+    assert len(bus.details("CaseReadyForRun")) == 1
+
+
+def test_nfr_rel_04_active_run_refuses_another_start(
+    api: Api, dynamodb: Any, bus: RecordingBus
+) -> None:
+    case_id = make_case(dynamodb, 914, 1, 1, CaseStatus.TRIAGED)
+    dynamodb.update_item(
+        TableName="aera-test-cases",
+        Key={"PK": {"S": f"CASE#{case_id}"}, "SK": {"S": "META"}},
+        UpdateExpression="SET activeRunId = :run",
+        ExpressionAttributeValues={":run": {"S": "already-running"}},
+    )
+    response = api.handle(request("POST", "/cases/{id}/runs", params={"id": case_id}, body={}))
+    assert response["statusCode"] == 409
+    assert not bus.details("CaseReadyForRun")

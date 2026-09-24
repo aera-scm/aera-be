@@ -49,7 +49,7 @@ class GitHubOidc(Construct):
             raise ValueError("Choose create or existing for the approved OIDC provider")
         bootstrap_roles = [
             f"arn:{stack.partition}:iam::{stack.account}:role/cdk-{qualifier}-{purpose}-role-{stack.account}-{stack.region}"
-            for purpose in ("deploy", "file-publishing", "lookup")
+            for purpose in ("deploy", "file-publishing", "image-publishing", "lookup")
         ]
         subject = f"repo:{repository}:ref:refs/heads/main"
         budget_arn = f"arn:{stack.partition}:budgets::{stack.account}:budget/{budget_name}"

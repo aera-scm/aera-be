@@ -203,6 +203,27 @@ class ControlStack(Stack):
                 notifier, event=events.RuleTargetInput.from_object({"task": "dialogueSweep"})
             )],
         )
+        replies = ServiceFunction(
+            self, "dialogue-replies", env_name=env_name, component="dialogue-replies",
+            code=code,
+        ).function
+        for name in ("dialogue", "cases", "audit"):
+            tables[name].grant_read_write_data(replies)
+        tables["signals"].grant_read_data(replies)
+        data.bus.grant_put_events_to(replies)
+        data.key.grant_encrypt_decrypt(replies)
+        events.Rule(
+            self,
+            "OnSupplierReply",
+            rule_name=f"aera-{env_name}-supplier-reply",
+            event_bus=data.bus,
+            event_pattern=events.EventPattern(
+                source=events.Match.prefix("aera."), detail_type=["CaseUpdated"]
+            ),
+            targets=[
+                targets.LambdaFunction(replies, retry_attempts=8, dead_letter_queue=dead_letters)
+            ],
+        )
         monitor = ServiceFunction(
             self,
             "monitor",

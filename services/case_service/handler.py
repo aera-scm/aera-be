@@ -100,7 +100,7 @@ class CaseService:
             case = self._open(subject, _signal_case_type(signal), first_signal=signal)
         else:
             self._attach(case, signal)
-            self._touch(case, reason="signal")
+            self._touch(case, reason="signal", signal_id=signal_id)
         return case.case_id
 
     def _case_for_signal(self, signal: Signal, subject: Subject) -> Case | None:
@@ -177,12 +177,13 @@ class CaseService:
         )
         return case
 
-    def _touch(self, case: Case, *, reason: str) -> None:
+    def _touch(self, case: Case, *, reason: str, signal_id: str | None = None) -> None:
         triage = self._triage(case)
         emit(
             self.bus,
             "CaseUpdated",
-            {**self._summary(case, triage, case.status), "reason": reason},
+            {**self._summary(case, triage, case.status), "reason": reason,
+             **({"signalId": signal_id} if signal_id else {})},
             component=COMPONENT,
             case_id=case.case_id,
             environment=self.env,

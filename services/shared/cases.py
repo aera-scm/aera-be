@@ -7,6 +7,7 @@ rejected and never half-applied.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -32,7 +33,14 @@ def _key(case_id: str) -> dict[str, Any]:
 
 
 class CaseStore:
-    def __init__(self, client: Any, env: str | None = None) -> None:
+    def __init__(
+        self,
+        client: Any,
+        env: str | None = None,
+        *,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        self._clock = clock
         self._client = client
         self._table = table_name("cases", env)
         self._audit = AuditWriter(client, env)
@@ -92,7 +100,7 @@ class CaseStore:
             raise IllegalTransitionError(
                 f"{source.value} -> {target.value} is not allowed (SRD 6.4)"
             )
-        now = datetime.now(UTC)
+        now = self._clock()
         stage = current.model_copy(update={"status": target}).stage
         update = {
             "Update": {
@@ -139,7 +147,7 @@ class CaseStore:
         values: dict[str, Any] = {
             ":rar": to_value(rar_usd),
             ":score": to_value(priority_score),
-            ":now": {"S": datetime.now(UTC).isoformat()},
+            ":now": {"S": self._clock().isoformat()},
         }
         expression = "SET rarUsd = :rar, priorityScore = :score, updatedAt = :now"
         if stockout_at is not None:
@@ -180,7 +188,7 @@ class CaseStore:
                 ":empty": {"L": []},
                 ":id": {"L": [{"S": signal_id}]},
                 ":raw": {"S": signal_id},
-                ":now": {"S": datetime.now(UTC).isoformat()},
+                ":now": {"S": self._clock().isoformat()},
             },
         )
 

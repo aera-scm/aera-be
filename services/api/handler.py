@@ -27,6 +27,7 @@ from typing import Any
 from services.api import whatif
 from services.api.admin import Admin, AdminError
 from services.api.chat import Chat
+from services.lab.service import Lab, LabError, mirror_patch_via
 from services.reporting.decision import RecordUnavailable, collect, render_html, render_pdf
 from services.reporting.metrics import kpis
 from services.routing.store import ApprovalConflict, ControlStore
@@ -119,6 +120,7 @@ class Api:
     scan: Callable[[str], str | None] = lambda text: None
     admin: Admin | None = None
     sap: Any = None  # SAP reads for projections and what-if (FR-SIM)
+    lab: Lab | None = None
 
     def __post_init__(self) -> None:
         self.chat = Chat(self.dynamodb, self.bus, scan=self.scan, clock=self.clock, env=self.env)
@@ -213,6 +215,12 @@ class Api:
         if resource == "/admin/settings":
             _require(user, ADMINS)
             return self._admin(lambda admin: admin.settings())
+        if resource == "/lab/runs":
+            _require(user, ADMINS)
+            return http.response(200, self._lab(lambda lab: lab.list()))
+        if resource == "/lab/runs/{id}":
+            _require(user, ADMINS)
+            return http.response(200, self._lab(lambda lab: lab.get(params["id"])))
         if resource == "/cases/{id}/projection":
             case = self._case(params["id"])
             return self._sim(lambda ctx: whatif.projection(ctx, case, http.query(event, "option")))
@@ -237,6 +245,11 @@ class Api:
             if resource == "/admin/killswitch":
                 return self._admin(lambda admin: admin.kill_switch(body.get("on"), actor))
             return self._admin(lambda admin: admin.reset(body.get("confirm"), actor))
+        if resource == "/lab/runs":
+            _require(user, ADMINS)
+            return http.response(
+                202, self._lab(lambda lab: lab.start(_json_body(event), f"user:{user.id}"))
+            )
         _require(user, PLANNERS)
         body = _json_body(event)
         if resource == "/signals":
@@ -281,6 +294,21 @@ class Api:
             return http.response(200, action(self.admin))
         except AdminError as error:
             raise Problem(400, "Refused", str(error)) from None
+
+    def _lab(self, action: Callable[[Lab], Any]) -> Any:
+        if self.lab is None:
+            raise Problem(503, "Scenario Lab is not configured")
+        try:
+            return action(self.lab)
+        except LabError as error:
+            status = (
+                404
+                if str(error) == "Lab run not found"
+                else 503
+                if "failed before signal delivery" in str(error)
+                else 400
+            )
+            raise Problem(status, "Scenario Lab refused", str(error)) from None
 
     def approve(self, case_id: str, body: dict[str, Any], user: User) -> dict[str, Any]:
         """FR-RTE-03/04, AT-16: the decision binds to the plan version hash; a stale or
@@ -704,20 +732,34 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
         dynamodb = runtime.client("dynamodb")
         bus = runtime.client("events")
+        intake = Intake(
+            dynamodb=dynamodb,
+            raw=RawStore(runtime.client("s3"), runtime.raw_bucket()),
+            bus=bus,
+            component=COMPONENT,
+        )
+        sap = runtime.sap_client()
+        lab_endpoint = sap.write
+        auth = lab_endpoint.auth if lab_endpoint else None
         _api = Api(
             dynamodb=dynamodb,
-            intake=Intake(
-                dynamodb=dynamodb,
-                raw=RawStore(runtime.client("s3"), runtime.raw_bucket()),
-                bus=bus,
-                component=COMPONENT,
-            ),
+            intake=intake,
             bus=bus,
             states=runtime.client("stepfunctions"),
             execution_arn=os.environ.get("AERA_EXECUTION_STATE_MACHINE_ARN", ""),
             scan=_guardrail_scan(runtime),
             admin=_admin_service(runtime, dynamodb),
-            sap=runtime.sap_client(),
+            sap=sap,
+            lab=Lab(
+                dynamodb=dynamodb,
+                intake=intake,
+                mirror_patch=mirror_patch_via(
+                    lab_endpoint.base_url, auth.apply if auth else (lambda headers: None)
+                ),
+                env=runtime.env(),
+            )
+            if lab_endpoint
+            else None,
         )
     return _api.handle(event)
 

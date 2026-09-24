@@ -32,8 +32,10 @@ def _value(
 
 def _sourced_rar(case: Case) -> Decimal | None:
     figures = [f for f in case.figures if f.name.startswith("rar:")]
-    if case.rar_usd is None or not figures or any(
-        not f.source_ref.startswith("SAP:") for f in figures
+    if (
+        case.rar_usd is None
+        or not figures
+        or any(not f.source_ref.startswith("SAP:") for f in figures)
     ):
         return None
     try:
@@ -47,7 +49,12 @@ def kpis(client: Any, env: str) -> dict[str, Any]:
     case_table = table_name("cases", env)
     signal_table = table_name("signals", env)
     cases = []
-    for item in _scan(client, case_table):
+    case_items = _scan(client, case_table)
+    lab_runs = sum(
+        str(item.get("PK", "")).startswith("LAB#") and item.get("SK") == "META"
+        for item in case_items
+    )
+    for item in case_items:
         if not str(item.get("PK", "")).startswith("CASE#") or item.get("SK") != "META":
             continue
         for key in ("PK", "SK", "stage"):
@@ -57,7 +64,8 @@ def kpis(client: Any, env: str) -> dict[str, Any]:
     closed = [case for case in cases if case.status is CaseStatus.CLOSED]
     durations = sorted(
         (case.updated_at - case.created_at).total_seconds() / 60
-        for case in closed if case.updated_at >= case.created_at
+        for case in closed
+        if case.updated_at >= case.created_at
     )
     sourced = [value for case in closed if (value := _sourced_rar(case)) is not None]
     tiers = Counter(str(case.tier) for case in cases if case.tier is not None)
@@ -65,27 +73,43 @@ def kpis(client: Any, env: str) -> dict[str, Any]:
     case_ref = f"DynamoDB:{case_table}/CASE#*/META"
     signal_ref = f"DynamoDB:{signal_table}/SIG#*/META"
     return {
-        "basis": "reference scenario (synthetic SAP Mirror)",
+        "basis": (
+            "reference scenario and Lab runs (synthetic SAP Mirror)"
+            if lab_runs
+            else "reference scenario (synthetic SAP Mirror)"
+        ),
         "asOf": datetime.now(UTC).isoformat(),
         "caseCount": _value(len(cases), "cases", case_ref, len(cases)),
         "revenueProtected": _value(
             sum(sourced, Decimal(0)),
-            "USD", case_ref + "/rarUsd (closed, SAP-sourced)", len(sourced),
+            "USD",
+            case_ref + "/rarUsd (closed, SAP-sourced)",
+            len(sourced),
         ),
-        "resolutionMedian": _value(median(durations) if durations else None,
-                                   "minutes", case_ref + "/createdAt,updatedAt", len(durations)),
+        "resolutionMedian": _value(
+            median(durations) if durations else None,
+            "minutes",
+            case_ref + "/createdAt,updatedAt",
+            len(durations),
+        ),
         "resolutionP95": _value(
             durations[ceil(0.95 * len(durations)) - 1] if durations else None,
-            "minutes", case_ref + "/createdAt,updatedAt", len(durations),
+            "minutes",
+            case_ref + "/createdAt,updatedAt",
+            len(durations),
         ),
         "touchlessRate": _value(
             sum(case.tier == 1 for case in closed) / len(closed) if closed else None,
-            "ratio", case_ref + "/tier,status", len(closed),
+            "ratio",
+            case_ref + "/tier,status",
+            len(closed),
         ),
         "approvalsRequested": _value(tiers["2"], "cases", case_ref + "/tier", len(cases)),
         "approvalsAvoided": _value(tiers["1"], "cases", case_ref + "/tier", len(cases)),
-        "tierDistribution": {tier: _value(tiers[tier], "cases", case_ref + "/tier", len(cases))
-                             for tier in ("1", "2", "3")},
+        "tierDistribution": {
+            tier: _value(tiers[tier], "cases", case_ref + "/tier", len(cases))
+            for tier in ("1", "2", "3")
+        },
         "blockedSignals": _value(blocked, "signals", signal_ref + "/status", len(signals)),
         "costPerCase": _value(None, "USD", "UNMEASURED:model-cost", 0),
         "optimiserSavings": _value(None, "USD", "UNMEASURED:portfolio-runtime", 0),

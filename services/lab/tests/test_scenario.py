@@ -2,13 +2,19 @@
 
 from datetime import UTC, datetime
 from io import BytesIO
+from typing import Any
 
 import pytest
 from PIL import Image
 from pydantic import ValidationError
 from pypdf import PdfReader
 
-from services.lab.scenario import Parameters, generate, mirror_changes
+from services.case_service.handler import CaseService
+from services.conftest import RecordingBus
+from services.lab.scenario import Parameters, generate, mirror_changes, scenario_po
+from services.lab.service import mirror_patch_via
+from services.mrp_poller.handler import MrpPoller
+from services.shared.triage import assess
 
 NOW = datetime(2026, 10, 5, 8, tzinfo=UTC)
 
@@ -85,3 +91,44 @@ def test_fr_lab_02_exception_artifacts_describe_distinct_disruptions() -> None:
     assert b"Carrier delay" in carrier.email
     assert "400 units short" in shortage.text
     assert "1600 units now arrive" in carrier.text
+
+
+@pytest.mark.parametrize("plant", ["1020", "1030"])
+def test_fr_lab_02_three_plant_template_has_pegged_sap_demand(plant: str, dynamodb: Any) -> None:
+    from mirror_process import AVAILABLE, MISSING, running_mirror
+
+    from services.shared.sap_client import Endpoint, SapClient, Target
+
+    if not AVAILABLE:
+        pytest.skip(MISSING)
+    chosen = params(plant=plant)
+    with running_mirror() as url:
+        patch = mirror_patch_via(url, lambda _: None)
+        patch(mirror_changes(chosen, NOW))
+        patch(mirror_changes(chosen, NOW))
+        sap = SapClient(read=Endpoint(base_url=url, target=Target.MIRROR, auth=None), write=None)
+        po = sap.get(
+            "API_PURCHASEORDER_PROCESS_SRV",
+            "A_PurchaseOrderItem",
+            {"PurchaseOrder": scenario_po(chosen), "PurchaseOrderItem": "10"},
+        )
+        impact = assess(sap, chosen.material, plant, NOW)
+        bus = RecordingBus()
+        counts = MrpPoller(sap, bus, env="test").poll()
+        assert po.data["Plant"] == plant
+        assert scenario_po(chosen) in generate(chosen, NOW, "lab-test").text
+        assert impact.on_hand == 50
+        assert impact.per_hour == 50
+        assert impact.rar_usd == 100_000
+        assert counts["total"] == 215 and counts["actionableCount"] == 7
+        selected = [
+            message
+            for event in bus.details("MrpExceptionsPolled")
+            for message in event["data"]["messages"]
+            if message["element"] == scenario_po(chosen) and message["plant"] == plant
+        ]
+        assert len(selected) == 1
+        cases = CaseService(dynamodb, sap, bus, clock=lambda: NOW, env="test")
+        [case_id] = cases.on_mrp({"messages": selected})
+        case = cases.cases.get(case_id)
+        assert case is not None and case.plant == plant and case.po_number == scenario_po(chosen)

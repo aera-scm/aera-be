@@ -18,6 +18,7 @@ from services.lab.scenario import (
     Parameters,
     generate,
     mirror_changes,
+    scenario_po,
 )
 from services.shared.audit import AuditWriter
 from services.shared.cases import CaseStore
@@ -62,7 +63,6 @@ def mirror_patch_via(
             f"{base}/admin/patch",
             json={"changes": json.dumps(changes)},
             headers=headers,
-            cookies=token.cookies,
         )
         if response.status_code != 200:
             raise LabError(f"Mirror patch failed with HTTP {response.status_code}")
@@ -92,7 +92,7 @@ class Lab:
             raise LabError(str(error)) from None
         run_id = new_ulid()
         now = self.clock().astimezone(UTC)
-        po, _, supplier = SEED[params.material]
+        po, supplier = scenario_po(params), SEED[params.material][2]
         record = {
             "PK": f"LAB#{run_id}",
             "SK": "META",
@@ -171,7 +171,7 @@ class Lab:
     def _inbound(
         self, params: Parameters, artifacts: Artifacts, supplier: str, now: datetime, run_id: str
     ) -> Inbound:
-        po, _, _ = SEED[params.material]
+        po = scenario_po(params)
         sender, phone = CONTACTS[supplier]
         if params.channel == "EMAIL":
             return Inbound(

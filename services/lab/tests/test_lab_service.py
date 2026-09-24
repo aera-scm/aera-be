@@ -133,3 +133,16 @@ def test_fr_lab_04_failed_mutation_never_submits_signal(
     assert refused["statusCode"] == 503
     assert rows[0]["status"] == "FAILED" and rows[0]["outcome"] == "DELIVERY_FAILED"
     assert bus.types() == []
+
+
+def test_fr_lab_01_selected_plant_uses_matching_po_in_signal(
+    dynamodb: Any, s3: Any, bus: RecordingBus
+) -> None:
+    intake = Intake(
+        dynamodb=dynamodb, raw=RawStore(s3, RAW_BUCKET), bus=bus, component="api", env="test"
+    )
+    lab = Lab(dynamodb, intake, lambda _: None, clock=lambda: NOW, env="test")
+    row = lab.start({**PARAMS, "plant": "1030", "hostile": False}, "user:admin")
+    signal = SignalStore(dynamodb, "test").get(row["signalIds"][0])
+    assert row["poNumber"] == "4502001240"
+    assert signal is not None and signal.po_number == row["poNumber"]

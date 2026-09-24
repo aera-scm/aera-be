@@ -2,7 +2,7 @@
 
 These exercise the live code paths against botocore stubs validated by the real
 service models. They prove ordering and failure handling only; the account
-checks and the invocation themselves remain WP-0b evidence (OT-01, OT-03).
+checks and the invocation themselves need a real account.
 """
 
 from collections.abc import Iterator

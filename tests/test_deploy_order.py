@@ -101,6 +101,9 @@ class Recorder:
             raise subprocess.CalledProcessError(3, list(command))
 
 
+OWNER = {"AERA_OWNER_TAG": "aera-test-owner"}
+
+
 def run_action(action: str, recorder: Recorder, *, verified: bool = True, env: str = "dev") -> Any:
     return run(
         action,
@@ -109,6 +112,7 @@ def run_action(action: str, recorder: Recorder, *, verified: bool = True, env: s
         region="us-east-1",
         verify=recorder.verify_ok if verified else recorder.verify_fails,
         runner=recorder.runner,
+        environ=OWNER,
     )
 
 
@@ -247,12 +251,48 @@ def test_a_01_deploy_accepts_valid_model_ids() -> None:
         verify=recorder.verify_ok,
         runner=recorder.runner,
         environ={
+            **OWNER,
             "MODEL_SUPERVISOR_ID": "anthropic.claude-sonnet-4-5-20250929-v1:0",
             "MODEL_SMALL_ID": "amazon.nova-lite-v1:0",
         },
     )
 
     assert recorder.events == ["verify", "bootstrap", "deploy-all"]
+
+
+@pytest.mark.parametrize("owner", [None, "", "   "])
+def test_srd_6_16_deploy_refuses_missing_owner_tag_before_any_call(owner: str | None) -> None:
+    recorder = Recorder()
+    environ = {} if owner is None else {"AERA_OWNER_TAG": owner}
+
+    with pytest.raises(DeploymentRefusedError, match="AERA_OWNER_TAG"):
+        run(
+            "deploy",
+            env_name="dev",
+            profile="aera-test",
+            region="us-east-1",
+            verify=recorder.verify_ok,
+            runner=recorder.runner,
+            environ=environ,
+        )
+
+    assert recorder.events == []
+
+
+def test_srd_6_16_bootstrap_does_not_need_the_owner_tag() -> None:
+    recorder = Recorder()
+
+    run(
+        "bootstrap",
+        env_name="dev",
+        profile="aera-test",
+        region="us-east-1",
+        verify=recorder.verify_ok,
+        runner=recorder.runner,
+        environ={},
+    )
+
+    assert recorder.events == ["verify", "bootstrap"]
 
 
 def test_unknown_action_is_refused() -> None:
@@ -288,8 +328,9 @@ def test_cli_refuses_final_before_contacting_aws(capsys: pytest.CaptureFixture[s
 
 
 def test_cli_missing_budget_blocks_bootstrap_through_real_verification(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("AERA_OWNER_TAG", "aera-test-owner")
     sts, budgets = sts_client(), budgets_client()
     with Stubber(sts) as sts_stub, Stubber(budgets) as budgets_stub:
         stub_caller_identity(sts_stub)
@@ -305,7 +346,8 @@ def test_cli_missing_budget_blocks_bootstrap_through_real_verification(
     assert "was not found" in capsys.readouterr().err
 
 
-def test_cli_verified_budget_allows_bootstrap_and_deploy() -> None:
+def test_cli_verified_budget_allows_bootstrap_and_deploy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AERA_OWNER_TAG", "aera-test-owner")
     recorder = Recorder()
     sts, budgets = sts_client(), budgets_client()
     with Stubber(sts) as sts_stub, Stubber(budgets) as budgets_stub:
@@ -323,7 +365,8 @@ def test_cli_verified_budget_allows_bootstrap_and_deploy() -> None:
     assert recorder.events == ["bootstrap", "deploy-all"]
 
 
-def test_cli_returns_failing_command_exit_code() -> None:
+def test_cli_returns_failing_command_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AERA_OWNER_TAG", "aera-test-owner")
     recorder = Recorder(fail_on="bootstrap")
     sts, budgets = sts_client(), budgets_client()
     with Stubber(sts) as sts_stub, Stubber(budgets) as budgets_stub:

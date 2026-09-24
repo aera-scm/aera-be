@@ -46,3 +46,14 @@ def test_public_code_client_is_pkce_compatible(template: assertions.Template) ->
         },
     )
     template.resource_count_is("AWS::Cognito::UserPoolDomain", 1)
+
+
+def test_hosted_ui_domain_does_not_publish_the_account_id(template: assertions.Template) -> None:
+    # The Hosted UI URL is public; derive uniqueness from the stack id instead.
+    domains = template.find_resources("AWS::Cognito::UserPoolDomain")
+    domain = next(iter(domains.values()))["Properties"]["Domain"]
+    text = str(domain)
+
+    assert "AWS::AccountId" not in text
+    assert "AWS::StackId" in text
+    assert domain["Fn::Join"][1][0] == "aera-dev-"

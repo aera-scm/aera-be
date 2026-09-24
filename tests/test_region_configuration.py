@@ -1,7 +1,7 @@
 """Offline region and model-id configuration checks (OI-04, A-01, NFR-CMP-02).
 
 No AWS call is made here. A passing configuration check is not account or
-invocation evidence; ADR-001 stays proposed until OT-01 and OT-03 are verified.
+invocation evidence; account and model access are verified separately.
 """
 
 from typing import NoReturn
@@ -127,7 +127,9 @@ def test_a_01_arn_is_rejected_in_favour_of_bare_model_id(arn: str) -> None:
 def test_a_01_missing_model_id_is_never_inferred(
     supervisor: str, small: str, variable: str
 ) -> None:
-    assert model_id_problems(supervisor, small) == [f"{variable} is required (OT-03)"]
+    assert model_id_problems(supervisor, small) == [
+        f"{variable} is required: an approved direct regional model id"
+    ]
 
 
 @pytest.mark.parametrize(

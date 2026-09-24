@@ -23,6 +23,10 @@ ENTITY_SETS = {
     APIS[5]: {"A_MaterialDocumentItem"},
 }
 EDMX = "http://schemas.microsoft.com/ado/2007/06/edmx"
+INCOMPLETE = (
+    "Official metadata inventory incomplete or invalid; "
+    "run --download with SAP_SANDBOX_API_KEY set."
+)
 EDM = "http://schemas.microsoft.com/ado/2008/09/edm"
 
 
@@ -99,9 +103,7 @@ def check_inventory(directory: Path) -> int:
                 raise ValueError
             validate_edmx(body, api)
     except (OSError, ValueError, KeyError, TypeError, SapError):
-        raise SapError(
-            "Official metadata inventory incomplete or invalid; complete OT-04."
-        ) from None
+        raise SapError(INCOMPLETE) from None
     return len(APIS)
 
 
@@ -117,7 +119,7 @@ def main(argv: Sequence[str] | None = None, *, environ: Mapping[str, str] | None
             download(args.directory, environment_key(os.environ if environ is None else environ))
         count = check_inventory(args.directory)
     except (SapError, OSError):
-        print("Official metadata inventory incomplete or invalid; complete OT-04.", file=sys.stderr)
+        print(INCOMPLETE, file=sys.stderr)
         return 1
     print(json.dumps({"status": "pass", "count": count, "sourceRef": "manifest.json"}))
     return 0

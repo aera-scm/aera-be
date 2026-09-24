@@ -28,20 +28,16 @@ def validate(environ: Mapping[str, str]) -> Decimal:
         or not environ.get("AERA_OWNER_TAG", "").strip()
         or not environ.get("AERA_BUDGET_NAME", "").strip()
     ):
-        raise DeploymentRefusedError(
-            "CI deployment requires approved dev/main configuration (OT-10)."
-        )
+        raise DeploymentRefusedError("CI deployment requires approved dev/main configuration.")
     try:
         limit = Decimal(environ.get("AERA_BUDGET_LIMIT_USD", ""))
         if not limit.is_finite() or limit <= 0:
             raise ValueError
     except (InvalidOperation, ValueError):
-        raise DeploymentRefusedError(
-            "An approved positive budget limit is required (OT-09)."
-        ) from None
+        raise DeploymentRefusedError("An approved positive budget limit is required.") from None
     models = [environ.get(name, "").strip() for name in ("MODEL_SUPERVISOR_ID", "MODEL_SMALL_ID")]
     if any(models) and model_id_problems(*models):
-        raise DeploymentRefusedError("Invalid regional model configuration (OT-03).")
+        raise DeploymentRefusedError("Invalid regional model configuration.")
     return limit
 
 

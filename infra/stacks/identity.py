@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from aws_cdk import CfnOutput, RemovalPolicy, Stack
+from aws_cdk import CfnOutput, Fn, RemovalPolicy, Stack
 from aws_cdk import aws_cognito as cognito
 from constructs import Construct
 
@@ -62,7 +62,15 @@ class IdentityStack(Stack):
             self,
             "HostedDomain",
             user_pool_id=pool.ref,
-            domain=f"aera-{env_name}-{self.account}-{self.region}",
+            # The Hosted UI URL is public, so it must not carry the account id. The first
+            # block of the stack GUID is unique per stack and stable for its lifetime.
+            domain=Fn.join(
+                "",
+                [
+                    f"aera-{env_name}-",
+                    Fn.select(0, Fn.split("-", Fn.select(2, Fn.split("/", self.stack_id)))),
+                ],
+            ),
         )
         CfnOutput(self, "UserPoolId", value=pool.ref)
         CfnOutput(self, "ClientId", value=client.ref)

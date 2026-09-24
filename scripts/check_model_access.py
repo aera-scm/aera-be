@@ -66,7 +66,7 @@ _MODEL_ID = re.compile(
 def _model_id_problem(variable: str, model_id: str) -> str | None:
     value = model_id.strip()
     if not value:
-        return f"{variable} is required (OT-03)"
+        return f"{variable} is required: an approved direct regional model id"
     if value.startswith("arn:"):
         return f"{variable} must be a bare model id, not an ARN (A-01)"
     match = _MODEL_ID.fullmatch(value)

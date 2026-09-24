@@ -25,7 +25,7 @@ from infra.stacks.budget import (
     settings_from_environment,
 )
 
-# Explicit test fixture values; real amount and recipients come from OT-09.
+# Explicit test fixture values; the real amount and recipients are operator inputs.
 SETTINGS = BudgetSettings(
     name="aera-test-monthly",
     limit_usd=Decimal("100"),

@@ -2,7 +2,7 @@
 
 Run from the repository root: ``python -m infra.app``. Inputs come from the
 environment: ``AERA_ENV``, ``AERA_OWNER_TAG`` (required), optional approved
-``MODEL_SUPERVISOR_ID`` / ``MODEL_SMALL_ID`` (OT-03) and optional names of
+``MODEL_SUPERVISOR_ID`` / ``MODEL_SMALL_ID`` and optional names of
 approved existing secrets ``AERA_SAP_SANDBOX_SECRET_NAME`` /
 ``AERA_SAP_MIRROR_SECRET_NAME``. The budget lives in ``infra/budget_app.py``.
 """
@@ -68,9 +68,9 @@ def build_app(settings: DataSettings) -> App:
     if settings.github_repository and not all(
         (settings.cdk_qualifier, settings.github_provider_mode, settings.budget_name)
     ):
-        raise ValueError("OIDC requires approved qualifier, provider mode and budget name (OT-10)")
+        raise ValueError("OIDC requires approved qualifier, provider mode and budget name")
     if settings.github_provider_mode and not settings.github_repository:
-        raise ValueError("OIDC requires an approved repository (OT-10)")
+        raise ValueError("OIDC requires an approved repository")
     model_ids = {
         key: value
         for key, value in (

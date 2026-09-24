@@ -51,7 +51,7 @@ def test_missing_key_makes_no_request(capsys: Any) -> None:
         pytest.fail("missing credential must prevent network access")
 
     assert smoke.main(environ={}, fetch=fetch) == 1
-    assert "OT-04" in capsys.readouterr().err
+    assert "set SAP_SANDBOX_API_KEY in the process environment" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("status", [301, 302, 400, 401, 403, 429, 500])

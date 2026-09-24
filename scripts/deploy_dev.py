@@ -77,6 +77,11 @@ def run(
             problems = model_id_problems(*models)
             if problems:
                 raise DeploymentRefusedError("; ".join(problems))
+        # SRD 6.16: the main app tags every resource with the owner; fail before any call.
+        if not (environ or {}).get("AERA_OWNER_TAG", "").strip():
+            raise DeploymentRefusedError(
+                "AERA_OWNER_TAG is required: the owner tag on every resource (SRD 6.16)."
+            )
     environment = {"AERA_ENV": env_name, "AWS_REGION": region}
     profile_args = ("--profile", profile)
     bootstrap_args: tuple[str, ...] = ()
@@ -88,7 +93,7 @@ def run(
             r"arn:aws:iam::[0-9]{12}:policy/[A-Za-z0-9+=,.@_/-]+", execution_policy
         ):
             raise DeploymentRefusedError(
-                "OIDC bootstrap needs an approved qualifier and scoped execution policy (OT-10)."
+                "OIDC bootstrap needs an approved qualifier and scoped execution policy."
             )
         bootstrap_args = (
             "--qualifier",

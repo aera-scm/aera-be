@@ -1,7 +1,7 @@
 """Stubbed Bedrock, AgentCore, Textract and Comprehend clients for offline tests.
 
 The model ids below are explicit test fixtures in the documented Bedrock format.
-They are not approved model ids; those come from OT-03 and ADR-001. A stubbed
+They are not approved model ids. A stubbed
 response never counts as account or invocation evidence (ADR-003).
 """
 

@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from mypy_boto3_sts import STSClient
     from mypy_boto3_textract import TextractClient
 
-# ADR-001 / OT-02: one region for everything.
+# ADR-001: one region for everything.
 APPROVED_REGION = "us-east-1"
 SDK_REGION_VARIABLES = ("AWS_REGION", "AWS_DEFAULT_REGION")
 

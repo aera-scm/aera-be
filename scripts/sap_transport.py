@@ -28,7 +28,9 @@ class SapError(Exception):
 def environment_key(environ: Mapping[str, str]) -> str:
     key = environ.get("SAP_SANDBOX_API_KEY", "")
     if not key or any(ord(char) < 32 or ord(char) > 126 for char in key):
-        raise SapError("SAP credential unavailable; complete OT-04 using the process environment.")
+        raise SapError(
+            "SAP credential unavailable; set SAP_SANDBOX_API_KEY in the process environment."
+        )
     return key
 
 

@@ -73,6 +73,27 @@ def test_fr_neg_02_sent_once_to_master_data_standin(
     assert "Welche Menge" in ses.sent[0]["Message"]["Body"]["Text"]["Data"]
 
 
+def test_fr_neg_02_orphaned_send_claim_escalates_without_resending(
+    dynamodb: Any, sap: SapClient, bus: RecordingBus
+) -> None:
+    message_id = prepared(dynamodb, sap, bus)
+    key = {"PK": {"S": f"CASE#{CASE}"}, "SK": {"S": f"MSG#{message_id}"}}
+    dynamodb.update_item(
+        TableName="aera-test-dialogue", Key=key,
+        UpdateExpression="SET sendClaim = :claim",
+        ExpressionAttributeValues={":claim": {"S": NOW.isoformat()}},
+    )
+    ses = Ses()
+    service = notifier(dynamodb, sap, ses, now=NOW + timedelta(minutes=6))
+
+    assert service.sweep_dialogue() == [{"status": "ESCALATED"}]
+    assert ses.sent == []
+    assert from_item(dynamodb.get_item(TableName="aera-test-dialogue", Key=key)["Item"])[
+        "status"] == "BLOCKED"
+    case = CaseStore(dynamodb, "test").get(CASE)
+    assert case is not None and case.status is CaseStatus.ESCALATED
+
+
 def test_v_14_tampered_draft_never_sends(
     dynamodb: Any, sap: SapClient, bus: RecordingBus
 ) -> None:

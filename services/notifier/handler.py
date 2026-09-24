@@ -201,13 +201,14 @@ class Notifier:
             args: dict[str, Any] = {
                 "TableName": self._dialogue,
                 "FilterExpression": (
-                    "#s = :sent OR ((#s = :blocked OR #s = :timedout) "
+                    "#s = :sent OR (#s = :draft AND attribute_exists(sendClaim)) "
+                    "OR ((#s = :blocked OR #s = :timedout) "
                     "AND attribute_not_exists(escalationDone))"
                 ),
                 "ExpressionAttributeNames": {"#s": "status"},
                 "ExpressionAttributeValues": {
                     ":sent": {"S": "SENT"}, ":blocked": {"S": "BLOCKED"},
-                    ":timedout": {"S": "TIMED_OUT"},
+                    ":timedout": {"S": "TIMED_OUT"}, ":draft": {"S": "DRAFT"},
                 },
             }
             if cursor is not None:
@@ -226,6 +227,28 @@ class Notifier:
         if item is None:
             return {"status": "MISSING"}
         record = from_item(item)
+        if record.get("status") == "DRAFT" and record.get("sendClaim"):
+            claimed_at = datetime.fromisoformat(str(record["sendClaim"]))
+            if self.clock() < claimed_at + timedelta(minutes=5):
+                return {"status": "UNCHANGED"}
+            try:
+                self.dynamodb.update_item(
+                    TableName=self._dialogue, Key=key,
+                    UpdateExpression="SET #s = :blocked, blockReason = :reason",
+                    ConditionExpression="#s = :draft AND sendClaim = :claim",
+                    ExpressionAttributeNames={"#s": "status"},
+                    ExpressionAttributeValues={
+                        ":draft": {"S": "DRAFT"}, ":blocked": {"S": "BLOCKED"},
+                        ":claim": {"S": str(record["sendClaim"])},
+                        ":reason": {"S": "SES send outcome unavailable"},
+                    },
+                )
+            except self.dynamodb.exceptions.ConditionalCheckFailedException:
+                return {"status": "UNCHANGED"}
+            done = self._ensure_dialogue_escalated(
+                case_id, message_id, "supplier send outcome unavailable"
+            )
+            return {"status": "ESCALATED" if done else "UNCHANGED"}
         if record.get("status") in {"BLOCKED", "TIMED_OUT"}:
             done = self._ensure_dialogue_escalated(
                 case_id, message_id, "supplier question blocked or timed out"

@@ -9,9 +9,8 @@ from typing import Any
 
 from services.dialogue.thread import DialogueStatus, Thread, accept_reply
 from services.shared.cases import CaseStore
-from services.shared.dynamo import from_item, table_name
+from services.shared.dynamo import from_item, table_name, to_item
 from services.shared.models import CaseStatus, SignalStatus
-from services.shared.runtime import emit
 from services.shared.signals import SignalStore
 
 TOKEN = re.compile(r"\b[A-F0-9]{24}\b")
@@ -64,30 +63,37 @@ class ReplyMatcher:
                     thread, token=token, supplier_id=signal.supplier_id,
                     signal_id=signal_id, gated=True, now=signal.received_at,
                 )
-                self.dynamodb.update_item(
-                    TableName=self.table,
-                    Key={"PK": raw["PK"], "SK": raw["SK"]},
-                    UpdateExpression="SET #s = :replied, replySignalId = :signal",
-                    ConditionExpression="#s = :sent AND supplierId = :supplier",
-                    ExpressionAttributeNames={"#s": "status"},
-                    ExpressionAttributeValues={
-                        ":sent": {"S": "SENT"}, ":replied": {"S": "REPLIED"},
-                        ":signal": {"S": signal_id},
-                        ":supplier": {"S": signal.supplier_id},
-                    },
+                outbox = table_name("cases", self.env)
+                events = (
+                    ("SupplierReplyMatched", {"caseId": signal.case_id,
+                                              "signalId": signal_id,
+                                              "messageId": message["messageId"]}),
+                    ("CaseReadyForRun", {"caseId": signal.case_id,
+                                         "reason": "supplier reply", "signalId": signal_id}),
                 )
-            except (ValueError, self.dynamodb.exceptions.ConditionalCheckFailedException):
+                self.dynamodb.transact_write_items(TransactItems=[
+                    {"Update": {
+                        "TableName": self.table, "Key": {"PK": raw["PK"], "SK": raw["SK"]},
+                        "UpdateExpression": "SET #s = :replied, replySignalId = :signal",
+                        "ConditionExpression": "#s = :sent AND supplierId = :supplier",
+                        "ExpressionAttributeNames": {"#s": "status"},
+                        "ExpressionAttributeValues": {
+                            ":sent": {"S": "SENT"}, ":replied": {"S": "REPLIED"},
+                            ":signal": {"S": signal_id},
+                            ":supplier": {"S": signal.supplier_id},
+                        },
+                    }},
+                    *[ {"Put": {
+                        "TableName": outbox,
+                        "Item": to_item({
+                            "PK": f"CASE#{signal.case_id}",
+                            "SK": f"OUTBOX#SUPPLIER_REPLY#{signal_id}#{kind}",
+                            "eventType": kind, "data": data, "sent": False,
+                        }),
+                        "ConditionExpression": "attribute_not_exists(PK)",
+                    }} for kind, data in events],
+                ])
+            except (ValueError, self.dynamodb.exceptions.TransactionCanceledException):
                 continue
-            emit(
-                self.bus, "SupplierReplyMatched",
-                {"caseId": signal.case_id, "signalId": signal_id,
-                 "messageId": message["messageId"]},
-                component="dialogue", case_id=signal.case_id, environment=self.env,
-            )
-            emit(
-                self.bus, "CaseReadyForRun",
-                {"caseId": signal.case_id, "reason": "supplier reply", "signalId": signal_id},
-                component="dialogue", case_id=signal.case_id, environment=self.env,
-            )
             return True
         return False

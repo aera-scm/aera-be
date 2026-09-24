@@ -6,6 +6,7 @@ from typing import Any
 from services.conftest import RecordingBus
 from services.dialogue.replies import ReplyMatcher
 from services.notifier.handler import Notifier
+from services.outbox.handler import OutboxRelay
 from services.shared.cases import CaseStore
 from services.shared.dynamo import from_item
 from services.shared.models import (
@@ -83,7 +84,20 @@ def test_at_20_german_question_reply_resumes_case(
     assert ReplyMatcher(dynamodb, bus, "test").match(signal_id)
     case = CaseStore(dynamodb, "test").get(CASE)
     assert case is not None and case.status is CaseStatus.WAITING_SUPPLIER
+    outbox = dynamodb.query(
+        TableName="aera-test-cases",
+        KeyConditionExpression="PK = :case AND begins_with(SK, :prefix)",
+        ExpressionAttributeValues={
+            ":case": {"S": f"CASE#{CASE}"}, ":prefix": {"S": "OUTBOX#SUPPLIER_REPLY#"},
+        },
+    )["Items"]
+    assert len(outbox) == 2
+    assert not bus.details("CaseReadyForRun")
+    OutboxRelay(dynamodb, bus, "test").relay({"Records": [
+        {"eventName": "INSERT", "dynamodb": {"NewImage": item}} for item in outbox
+    ]})
     assert bus.details("CaseReadyForRun")[-1]["data"]["signalId"] == signal_id
+    assert not ReplyMatcher(dynamodb, bus, "test").match(signal_id)
     item = dynamodb.get_item(
         TableName="aera-test-dialogue",
         Key={"PK": {"S": f"CASE#{CASE}"}, "SK": {"S": f"MSG#{message_id}"}},

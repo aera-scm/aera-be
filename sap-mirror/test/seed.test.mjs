@@ -189,7 +189,7 @@ test("FR-LRN-01 seeds twelve dated supplier schedules and fifteen posted goods r
   const orders = await all("API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder?$filter=Supplier eq '1000234'");
   const historical = orders.filter((order) => /^45000030\d\d$/.test(order.PurchaseOrder));
   const documents = await all("API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentItem?$filter=GoodsMovementType eq '101'");
-  const headers = await all("API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentHeader");
+  const headers = await all("API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentHeader"); // pragma: allowlist secret
   assert.equal(historical.length, 12);
   assert.equal(documents.length, 15);
   assert.equal(headers.length, 15);

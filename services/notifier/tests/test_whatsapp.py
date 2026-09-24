@@ -9,25 +9,39 @@ from services.dialogue.policy import Language, Question, SupplierFacts, Template
 from services.notifier.whatsapp import WhatsAppDeliveryError, WhatsAppTemplateSender
 
 FACTS = SupplierFacts(
-    "EXC-2026-0914", "1000234", frozenset({"4500001234"}), "+447700900234",
-    Language.DE, "SAP:API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder('4500001234')",
+    "EXC-2026-0914",
+    "1000234",
+    frozenset({"4500001234"}),
+    "+447700900234",
+    Language.DE,
+    "SAP:API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder('4500001234')",
     "WHATSAPP",
 )
 
 
 def question() -> Question:
     return render_question(
-        FACTS, "4500001234", Template.CONFIRM_SHIP_DATE, "ABCDEF0123456789ABCDEF01"
+        FACTS,
+        "4500001234",
+        Template.CONFIRM_SHIP_DATE,
+        "ABCDEF0123456789ABCDEF01",  # pragma: allowlist secret
     )
 
 
 def settings(body: str) -> dict[str, object]:
     return {
-        "accessToken": "synthetic-token", "phoneNumberId": "123456789",
+        "accessToken": "synthetic-token",
+        "phoneNumberId": "123456789",
         "standins": {"+447700900234": "+447700900999"},
-        "templates": {"CONFIRM_SHIP_DATE": {"DE": {
-            "name": "aera_confirm_ship_date", "languageCode": "de", "body": body,
-        }}},
+        "templates": {
+            "CONFIRM_SHIP_DATE": {
+                "DE": {
+                    "name": "aera_confirm_ship_date",
+                    "languageCode": "de",
+                    "body": body,
+                }
+            }
+        },
     }
 
 

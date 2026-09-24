@@ -170,6 +170,8 @@ class Api:
             self._case(params["id"])
             events = self.trace.events(params["id"], after=http.query(event, "after"))
             return http.response(200, [e.model_dump(mode="json", by_alias=True) for e in events])
+        if resource == "/cases/{id}/dialogue":
+            return http.response(200, self.dialogue_thread(params["id"]))
         if resource == "/signals":
             return http.response(200, self.signal_list(http.query(event, "status")))
         if resource == "/metrics":
@@ -404,6 +406,38 @@ class Api:
             "case": _case_json(case),
             "signals": [s.model_dump(mode="json", by_alias=True) for s in signals],
         }
+
+    def dialogue_thread(self, case_id: str) -> list[dict[str, Any]]:
+        self._case(case_id)
+        arguments: dict[str, Any] = {
+            "TableName": table_name("dialogue", self.env),
+            "KeyConditionExpression": "PK = :case AND begins_with(SK, :message)",
+            "ExpressionAttributeValues": {
+                ":case": {"S": f"CASE#{case_id}"}, ":message": {"S": "MSG#"},
+            },
+        }
+        messages: list[dict[str, Any]] = []
+        while True:
+            page = self.dynamodb.query(**arguments)
+            for raw in page.get("Items", []):
+                item = from_item(raw, keep_decimals=False)
+                entry: dict[str, Any] = {key: item[key] for key in (
+                    "messageId", "templateId", "language", "renderedText", "englishCopy",
+                    "status", "createdAt", "sentAt", "reminderSent", "replySignalId",
+                ) if key in item}
+                reply_id = item.get("replySignalId")
+                if reply_id:
+                    reply = self.signals.get(str(reply_id))
+                    if reply and reply.case_id == case_id and reply.status is SignalStatus.ACCEPTED:
+                        entry["reply"] = {
+                            "receivedAt": reply.received_at.isoformat(),
+                            "text": reply.normalized_text or "",
+                        }
+                messages.append(entry)
+            if "LastEvaluatedKey" not in page:
+                break
+            arguments["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+        return sorted(messages, key=lambda message: str(message.get("createdAt", "")))
 
     def signal_list(self, status: str | None) -> list[dict[str, Any]]:
         """FR-UI-05: quarantined signals are shown with their reason; they have no case."""

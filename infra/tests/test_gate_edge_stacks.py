@@ -150,7 +150,8 @@ def test_nfr_sec_04_console_routes_need_cognito_webhooks_need_signatures(
     assert routes == {
         ("GET", "/cases"): "COGNITO_USER_POOLS",
         ("GET", "/cases/{id}"): "COGNITO_USER_POOLS",
-        ("GET", "/cases/{id}/trace"): "COGNITO_USER_POOLS",
+            ("GET", "/cases/{id}/trace"): "COGNITO_USER_POOLS",
+            ("GET", "/cases/{id}/dialogue"): "COGNITO_USER_POOLS",
         ("POST", "/cases/{id}/runs"): "COGNITO_USER_POOLS",
         ("POST", "/cases/{id}/rollback"): "COGNITO_USER_POOLS",
         ("POST", "/cases/{id}/chat"): "COGNITO_USER_POOLS",

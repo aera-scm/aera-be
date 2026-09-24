@@ -12,6 +12,7 @@ from services.api.handler import Api
 from services.conftest import RAW_BUCKET, RecordingBus
 from services.shared.audit import AuditWriter
 from services.shared.cases import CaseStore
+from services.shared.dynamo import to_item
 from services.shared.intake import Inbound, Intake
 from services.shared.models import (
     Case,
@@ -111,6 +112,30 @@ def test_fr_tri_01_board_is_ranked_by_score_then_time_to_line_stop(api: Api, dyn
     assert rows[0]["stage"] == "TRIAGE" and rows[0]["rarUsd"] == 4_720_000
     only_new = body(api.handle(request("GET", "/cases", query={"status": "RECEIVED"})))
     assert [r["caseId"] for r in only_new] == ["EXC-2026-0917"]
+
+
+def test_fr_neg_03_dialogue_thread_exposes_case_scoped_status(
+    api: Api, dynamodb: Any
+) -> None:
+    case_id = make_case(dynamodb, 914, 10, None, CaseStatus.RECEIVED)
+    for number in (914, 915):
+        dynamodb.put_item(TableName="aera-test-dialogue", Item=to_item({
+            "PK": f"CASE#EXC-2026-{number:04d}", "SK": "MSG#abc",
+            "messageId": "abc", "templateId": "CONFIRM_SHIP_DATE", "language": "DE",
+            "renderedText": "Lieferdatum?", "englishCopy": "Delivery date?",
+            "status": "SENT", "createdAt": T0,
+        }))
+
+    response = api.handle(request("GET", "/cases/{id}/dialogue", params={"id": case_id}))
+
+    assert response["statusCode"] == 200
+    assert body(response) == [{
+        "messageId": "abc", "templateId": "CONFIRM_SHIP_DATE", "language": "DE",
+        "renderedText": "Lieferdatum?", "englishCopy": "Delivery date?",
+        "status": "SENT", "createdAt": T0.isoformat(),
+    }]
+    assert api.handle(request("GET", "/cases/{id}/dialogue", groups="supplier",
+                              params={"id": case_id}))["statusCode"] == 403
 
 
 def test_nfr_sec_04_roles_are_enforced(api: Api) -> None:

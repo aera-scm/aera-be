@@ -161,6 +161,7 @@ class EdgeStack(Stack):
         case = cases.add_resource("{id}")
         signed(case, "GET")
         signed(case.add_resource("trace"), "GET")
+        signed(case.add_resource("dialogue"), "GET")
         signed(case.add_resource("runs"), "POST")
         signed(case.add_resource("rollback"), "POST")
         signed(case.add_resource("chat"), "POST")

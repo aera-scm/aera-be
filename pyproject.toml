@@ -33,6 +33,9 @@ dev = [
     "ruff==0.16.8",
     "yamllint==1.38.0",
 ]
+load = [
+    "locust==2.43.3",
+]
 optimizer = [
     "ortools==9.15.6755",
 ]

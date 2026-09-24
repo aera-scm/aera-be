@@ -1,0 +1,7 @@
+PurchasingDocument,PurchasingDocumentItem,ScheduleLine,DelivDateCategory,ScheduleLineDeliveryDate,PurchaseOrderQuantityUnit,ScheduleLineOrderQuantity,ScheduleLineDeliveryTime,ScheduleLineCommittedQuantity
+4500001234,10,1,1,{T0},PC,1600,{T0},1600
+4500001240,10,1,1,{T0+1d},PC,800,{T0+1d},800
+4500001251,10,1,1,{T0+2d},PC,300,{T0+2d},300
+4500001262,10,1,1,{T0+1d},PC,400,{T0+1d},400
+4500001273,10,1,1,{T0+3d},PC,250,{T0+3d},250
+4500001284,10,1,1,{T0+5d},PC,1500,{T0+5d},1500

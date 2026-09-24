@@ -1,0 +1,4 @@
+AddressID,Person,OrdinalNumber,IsDefaultEmailAddress,EmailAddress
+22001,,1,true,orders@krieger-guss.example
+22002,,1,true,sales@halim-presisi.example
+22003,,1,true,tracking@nusantara-freight.example

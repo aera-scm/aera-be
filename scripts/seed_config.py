@@ -1,6 +1,7 @@
-"""Seed the SRD 6.23 Config-table defaults idempotently (DR-10, NFR-MNT-02).
+"""Seed the Config table idempotently (DR-10, DR-11, DR-12, NFR-MNT-02).
 
-Each default is written only if its key is absent, so re-running never
+Writes the SRD 6.23 defaults, the reference-scenario rate card and the approver
+limits. Each item is written only if its key is absent, so re-running never
 overwrites a value an administrator changed. Only ``dev`` in the approved
 region is accepted.
 
@@ -12,7 +13,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -31,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from infra.config_defaults import CONFIG_DEFAULTS  # noqa: E402
+from infra.config_defaults import APPROVER_LIMITS, CONFIG_DEFAULTS, RATE_CARD  # noqa: E402
 from infra.environments import (  # noqa: E402
     EnvironmentRefusedError,
     require_deployable_environment,
@@ -50,8 +51,12 @@ class SeedResult:
     preserved: list[str]
 
 
-def _attribute(value: Decimal | str) -> dict[str, str]:
-    return {"N": str(value)} if isinstance(value, Decimal) else {"S": value}
+def _attribute(value: object) -> dict[str, str]:
+    if isinstance(value, Decimal):
+        return {"N": str(value)}
+    if isinstance(value, str):
+        return {"S": value}
+    raise TypeError(f"unsupported config value {value!r}")
 
 
 def config_items(changed_at: str) -> list[dict[str, Any]]:
@@ -67,6 +72,27 @@ def config_items(changed_at: str) -> list[dict[str, Any]]:
     ]
 
 
+def _record(prefix: str, key: str, fields: Mapping[str, object], **audit: str) -> dict[str, Any]:
+    item: dict[str, Any] = {"PK": {"S": f"{prefix}#{key}"}}
+    item.update({name: _attribute(value) for name, value in fields.items()})
+    item.update({name: {"S": value} for name, value in audit.items()})
+    return item
+
+
+def rate_card_items(changed_at: str) -> list[dict[str, Any]]:
+    return [
+        _record("RATE", entry["entryId"], entry, changedBy=SEED_ACTOR, changedAt=changed_at)
+        for entry in RATE_CARD
+    ]
+
+
+def approver_items(changed_at: str) -> list[dict[str, Any]]:
+    return [
+        _record("APPR", entry["userId"], entry, grantedBy=SEED_ACTOR, grantedAt=changed_at)
+        for entry in APPROVER_LIMITS
+    ]
+
+
 def seed(client: DynamoDBClient, *, env_name: str, changed_at: str) -> SeedResult:
     try:
         require_deployable_environment(env_name)
@@ -77,8 +103,9 @@ def seed(client: DynamoDBClient, *, env_name: str, changed_at: str) -> SeedResul
         raise SeedRefusedError("; ".join(problems))
 
     written, preserved = [], []
-    for item in config_items(changed_at):
-        key = item["key"]["S"]
+    items = config_items(changed_at) + rate_card_items(changed_at) + approver_items(changed_at)
+    for item in items:
+        key = item["PK"]["S"]
         try:
             client.put_item(
                 TableName=f"aera-{env_name}-config",
@@ -122,7 +149,7 @@ def main(
         return 1
     kept = len(result.preserved)
     print(
-        f"{len(result.written)} defaults written, "
+        f"{len(result.written)} items written, "
         f"{kept} existing value{'' if kept == 1 else 's'} preserved"
     )
     return 0

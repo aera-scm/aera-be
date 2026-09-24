@@ -1,0 +1,4 @@
+Supplier,SupplierName,SupplierFullName,PurchasingIsBlocked,ComplianceStatus
+1000234,Krieger Guss GmbH,Krieger Guss GmbH,false,APPROVED
+1000871,PT Halim Presisi,PT Halim Presisi,false,UNDER_REVIEW
+1000950,Nusantara Freight Lines,Nusantara Freight Lines,false,APPROVED

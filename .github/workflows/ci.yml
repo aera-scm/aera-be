@@ -31,5 +31,7 @@ jobs:
         run: |
           uv sync --locked
           pnpm install --frozen-lockfile
+          pnpm --dir sap-mirror install --frozen-lockfile
+          node sap-mirror/scripts/fetch-sap-schemas.mjs
       - name: Lint, type check, tests and synth assertions, secret scan and dependency audits
         run: uv run --locked python scripts/check.py

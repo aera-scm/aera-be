@@ -1,0 +1,7 @@
+PurchaseOrder,CompanyCode,PurchaseOrderType,PurchasingProcessingStatus,CreationDate,Supplier,PurchasingOrganization,PurchasingGroup,PurchaseOrderDate,DocumentCurrency,SupplyingPlant
+4500001234,1010,NB,05,{T0-30d},1000234,1010,001,{T0-30d},USD,
+4500001240,1010,NB,05,{T0-28d},1000234,1010,001,{T0-28d},USD,
+4500001251,1010,NB,05,{T0-25d},1000871,1010,001,{T0-25d},USD,
+4500001262,1010,NB,05,{T0-21d},1000234,1010,001,{T0-21d},USD,
+4500001273,1010,NB,05,{T0-20d},1000871,1010,001,{T0-20d},USD,
+4500001284,1010,NB,05,{T0-18d},1000234,1010,001,{T0-18d},USD,

@@ -1,4 +1,4 @@
-.PHONY: setup lint typecheck test scan audit check hooks check-budget check-region check-models seed-config provision-secrets budget bootstrap deploy
+.PHONY: mirror-local mirror-model setup lint typecheck test scan audit check hooks check-budget check-region check-models seed-config provision-secrets budget bootstrap deploy
 
 # Deployment targets read AERA_AWS_PROFILE, AERA_REGION and AERA_BUDGET_* from the
 # environment. Only ENV=dev is accepted; the budget is verified before bootstrap.
@@ -7,6 +7,8 @@ ENV ?= dev
 setup:
 	uv sync --locked
 	pnpm install --frozen-lockfile
+	pnpm --dir sap-mirror install --frozen-lockfile
+	node sap-mirror/scripts/fetch-sap-schemas.mjs
 
 lint:
 	uv run --locked python scripts/check.py lint
@@ -52,3 +54,11 @@ seed-config:
 
 provision-secrets:
 	uv run --locked python scripts/provision_secrets.py --env $(ENV)  # pragma: allowlist secret
+
+# SAP Mirror on SQLite in memory, seeded with the reference scenario at start.
+mirror-local:
+	pnpm --dir sap-mirror start
+
+# Regenerate the Mirror's S/4HANA entities from SAP's published schemas.
+mirror-model:
+	node sap-mirror/scripts/generate-model.mjs

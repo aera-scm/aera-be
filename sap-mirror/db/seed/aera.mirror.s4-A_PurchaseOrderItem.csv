@@ -1,0 +1,7 @@
+PurchaseOrder,PurchaseOrderItem,PurchaseOrderItemText,Plant,StorageLocation,OrderQuantity,PurchaseOrderQuantityUnit,DocumentCurrency,NetPriceAmount,NetPriceQuantity,IsCompletelyDelivered,PurchaseOrderItemCategory,Material
+4500001234,10,Brake caliper housing,1010,101A,1600,PC,USD,42.500,1,false,0,MAT-48219
+4500001240,10,Brake disc front,1010,101A,800,PC,USD,31.000,1,false,0,MAT-51002
+4500001251,10,Wiring harness main,1010,101A,300,PC,USD,118.000,1,false,0,MAT-33871
+4500001262,10,Seat frame rear,1010,101A,400,PC,USD,64.000,1,false,0,MAT-20114
+4500001273,10,Fuel pump module,1010,101A,250,PC,USD,87.000,1,false,0,MAT-60417
+4500001284,10,Door hinge set,1010,101A,1500,PC,USD,9.500,1,false,0,MAT-72055

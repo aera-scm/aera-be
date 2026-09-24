@@ -1,0 +1,8 @@
+Material,Plant,StorageLocation,Batch,Supplier,Customer,WBSElementInternalID,SDDocument,SDDocumentItem,InventorySpecialStockType,InventoryStockType,MaterialBaseUnit,MatlWrhsStkQtyInMatlBaseUnit
+MAT-48219,1010,101A,,,,,,,,01,PC,310
+MAT-48219,1020,102A,,,,,,,,01,PC,1080
+MAT-51002,1010,101A,,,,,,,,01,PC,900
+MAT-33871,1010,101A,,,,,,,,01,PC,400
+MAT-20114,1010,101A,,,,,,,,01,PC,120
+MAT-60417,1010,101A,,,,,,,,01,PC,700
+MAT-72055,1010,101A,,,,,,,,01,PC,2000

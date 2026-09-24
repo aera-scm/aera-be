@@ -13,9 +13,14 @@ from botocore import UNSIGNED
 from botocore.config import Config
 from botocore.stub import ANY, Stubber
 from mypy_boto3_dynamodb import DynamoDBClient
-from seed_config import SeedRefusedError, config_items, main, seed
+from seed_config import SeedRefusedError, approver_items, config_items, main, rate_card_items, seed
 
-from infra.config_defaults import CONFIG_DEFAULTS, SSM_PARAMETER_KEYS
+from infra.config_defaults import (
+    APPROVER_LIMITS,
+    CONFIG_DEFAULTS,
+    RATE_CARD,
+    SSM_PARAMETER_KEYS,
+)
 
 # SRD 6.23, written out independently of the implementation.
 EXPECTED_DEFAULTS: dict[str, Any] = {
@@ -76,34 +81,82 @@ def test_dr_10_config_items_use_the_srd_key_layout() -> None:
     assert kill["value"] == {"S": "off"}
 
 
+# Rate card and approver limits ----------------------------------------------
+
+
+def test_dr_11_rate_card_prices_the_reference_options() -> None:
+    by_type = {entry["actionType"]: entry for entry in RATE_CARD}
+
+    sto = by_type["STO"]
+    assert (sto["fromPlant"], sto["toPlant"]) == ("1020", "1010")
+    assert (sto["fixedCostUsd"], sto["unitCostUsd"], sto["leadTimeHours"]) == (
+        Decimal("4100"),
+        Decimal("0"),
+        Decimal("5"),
+    )
+    air = by_type["AIR_FREIGHT"]
+    assert air["supplierId"] == "1000234"
+    assert (air["fixedCostUsd"], air["leadTimeHours"]) == (Decimal("38200"), Decimal("17"))
+    alternate = by_type["ALTERNATE_SUPPLIER"]
+    assert alternate["supplierId"] == "1000871"
+    assert alternate["unitCostUsd"] * 800 + alternate["fixedCostUsd"] == Decimal("51900")
+    assert sto["fixedCostUsd"] + air["fixedCostUsd"] == Decimal("42300")
+
+
+def test_dr_12_approvers_cover_the_reference_plan_with_a_backup() -> None:
+    approvers = [entry for entry in APPROVER_LIMITS if entry["role"] == "approver"]
+
+    assert len(approvers) >= 2, "an approver and a backup approver (BR-23)"
+    assert all(entry["limitUsd"] >= Decimal("50000") for entry in approvers)  # OI-06
+    assert all(entry["plant"] == "1010" for entry in approvers)
+    assert all(entry["userId"].endswith(".example") for entry in approvers)
+
+
+def test_dr_11_dr_12_items_use_the_srd_key_layout() -> None:
+    rate = rate_card_items(changed_at="2026-09-23T00:00:00Z")[0]
+    approver = approver_items(changed_at="2026-09-23T00:00:00Z")[0]
+
+    assert rate["PK"]["S"] == f"RATE#{RATE_CARD[0]['entryId']}"
+    assert rate["fixedCostUsd"] == {"N": str(RATE_CARD[0]["fixedCostUsd"])}
+    assert rate["changedBy"] == {"S": "seed"}
+    assert approver["PK"]["S"] == f"APPR#{APPROVER_LIMITS[0]['userId']}"
+    assert approver["limitUsd"] == {"N": str(APPROVER_LIMITS[0]["limitUsd"])}
+    assert approver["grantedBy"] == {"S": "seed"}
+
+
 # Seeding ----------------------------------------------------------------------
+
+ALL_KEYS = (
+    [f"CFG#{key}" for key in sorted(EXPECTED_DEFAULTS)]
+    + [f"RATE#{entry['entryId']}" for entry in RATE_CARD]
+    + [f"APPR#{entry['userId']}" for entry in APPROVER_LIMITS]
+)
 
 
 def dynamodb_client(region: str = "us-east-1") -> DynamoDBClient:
     return boto3.client("dynamodb", region_name=region, config=Config(signature_version=UNSIGNED))
 
 
-def expected_put(item_key: str) -> dict[str, Any]:
-    return {
-        "TableName": "aera-dev-config",
-        "Item": ANY,
-        "ConditionExpression": "attribute_not_exists(PK)",
-    }
+EXPECTED_PUT = {
+    "TableName": "aera-dev-config",
+    "Item": ANY,
+    "ConditionExpression": "attribute_not_exists(PK)",
+}
 
 
 def stub_puts(stubber: Stubber, existing: set[str]) -> None:
-    for key in sorted(EXPECTED_DEFAULTS):
+    for key in ALL_KEYS:
         if key in existing:
             stubber.add_client_error(
                 "put_item",
                 service_error_code="ConditionalCheckFailedException",
-                expected_params=expected_put(key),
+                expected_params=EXPECTED_PUT,
             )
         else:
-            stubber.add_response("put_item", {}, expected_put(key))
+            stubber.add_response("put_item", {}, EXPECTED_PUT)
 
 
-def test_nfr_mnt_02_first_seed_writes_every_default() -> None:
+def test_nfr_mnt_02_first_seed_writes_every_default_rate_and_limit() -> None:
     client = dynamodb_client()
     with Stubber(client) as stubber:
         stub_puts(stubber, existing=set())
@@ -112,13 +165,18 @@ def test_nfr_mnt_02_first_seed_writes_every_default() -> None:
 
         stubber.assert_no_pending_responses()
 
-    assert result.written == sorted(EXPECTED_DEFAULTS)
+    assert result.written == ALL_KEYS
     assert result.preserved == []
 
 
 def test_nfr_mnt_02_reseeding_preserves_administrator_changes() -> None:
     client = dynamodb_client()
-    changed = {"TIER1_MAX_USD", "KILL_SWITCH"}
+    changed = {
+        "CFG#TIER1_MAX_USD",
+        "CFG#KILL_SWITCH",
+        ALL_KEYS[-1],
+        f"RATE#{RATE_CARD[0]['entryId']}",
+    }
     with Stubber(client) as stubber:
         stub_puts(stubber, existing=changed)
 
@@ -126,19 +184,19 @@ def test_nfr_mnt_02_reseeding_preserves_administrator_changes() -> None:
 
         stubber.assert_no_pending_responses()
 
-    assert result.preserved == sorted(changed)
-    assert result.written == sorted(set(EXPECTED_DEFAULTS) - changed)
+    assert sorted(result.preserved) == sorted(changed)
+    assert result.written == [key for key in ALL_KEYS if key not in changed]
 
 
 def test_nfr_mnt_02_second_seed_changes_nothing() -> None:
     client = dynamodb_client()
     with Stubber(client) as stubber:
-        stub_puts(stubber, existing=set(EXPECTED_DEFAULTS))
+        stub_puts(stubber, existing=set(ALL_KEYS))
 
         result = seed(client, env_name="dev", changed_at="2026-09-23T00:00:00Z")
 
     assert result.written == []
-    assert result.preserved == sorted(EXPECTED_DEFAULTS)
+    assert result.preserved == ALL_KEYS
 
 
 def test_seed_stops_on_other_api_errors_with_code_only() -> None:
@@ -171,10 +229,10 @@ def test_seed_refuses_client_outside_approved_region() -> None:
 def test_seed_cli_reports_counts(capsys: pytest.CaptureFixture[str]) -> None:
     client = dynamodb_client()
     with Stubber(client) as stubber:
-        stub_puts(stubber, existing={"TIER1_MAX_USD"})
+        stub_puts(stubber, existing={"CFG#TIER1_MAX_USD"})
 
         code = main(["--env", "dev", "--profile", "aera-test"], client_factory=lambda p, r: client)
 
     out = capsys.readouterr().out
     assert code == 0
-    assert f"{len(EXPECTED_DEFAULTS) - 1} defaults written, 1 existing value preserved" in out
+    assert f"{len(ALL_KEYS) - 1} items written, 1 existing value preserved" in out

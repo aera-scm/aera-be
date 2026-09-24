@@ -7,6 +7,7 @@ held in SSM Parameter Store under ``/aera/{env}/``.
 """
 
 from decimal import Decimal
+from typing import NotRequired, TypedDict
 
 CONFIG_DEFAULTS: dict[str, Decimal | str] = {
     "TIER1_MAX_USD": Decimal("25000"),
@@ -38,4 +39,86 @@ SSM_PARAMETER_KEYS: tuple[str, ...] = (
     "SAP_READ_BASE",
     "SAP_WRITE_BASE",
     "SAP_SANDBOX_BASE",
+)
+
+
+class RateCardEntry(TypedDict):
+    entryId: str
+    actionType: str
+    fromPlant: NotRequired[str]
+    toPlant: NotRequired[str]
+    supplierId: NotRequired[str]
+    lane: NotRequired[str]
+    unitCostUsd: Decimal
+    fixedCostUsd: Decimal
+    leadTimeHours: Decimal
+    validFrom: str
+    validTo: str
+
+
+class ApproverLimit(TypedDict):
+    userId: str
+    role: str
+    plant: str
+    limitUsd: Decimal
+    validFrom: str
+    validTo: str
+
+
+# DR-11 rate card for the reference scenario (SRD 6.6.3). Synthetic; the alternate
+# supplier's lead time is not given by the SRD and is a seed assumption (36 h).
+RATE_CARD: tuple[RateCardEntry, ...] = (
+    {
+        "entryId": "RC-STO-1020-1010",
+        "actionType": "STO",
+        "fromPlant": "1020",
+        "toPlant": "1010",
+        "unitCostUsd": Decimal("0"),
+        "fixedCostUsd": Decimal("4100"),
+        "leadTimeHours": Decimal("5"),
+        "validFrom": "2026-01-01",
+        "validTo": "9999-12-31",
+    },
+    {
+        "entryId": "RC-AIR-1000234",
+        "actionType": "AIR_FREIGHT",
+        "supplierId": "1000234",
+        "lane": "DE-ID",
+        "unitCostUsd": Decimal("0"),
+        "fixedCostUsd": Decimal("38200"),
+        "leadTimeHours": Decimal("17"),
+        "validFrom": "2026-01-01",
+        "validTo": "9999-12-31",
+    },
+    {
+        "entryId": "RC-ALT-1000871",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "supplierId": "1000871",
+        "unitCostUsd": Decimal("64.875"),
+        "fixedCostUsd": Decimal("0"),
+        "leadTimeHours": Decimal("36"),
+        "validFrom": "2026-01-01",
+        "validTo": "9999-12-31",
+    },
+)
+
+# DR-12 approver limits (OI-06): synthetic users until the owner names real ones. The
+# backup approver covers the USD 42,300 reference plan (BR-23).
+APPROVER_LIMITS: tuple[ApproverLimit, ...] = (
+    {
+        "userId": "approver@meridian-motors.example",
+        "role": "approver",
+        "plant": "1010",
+        "limitUsd": Decimal("50000"),
+        "validFrom": "2026-01-01",
+        "validTo": "9999-12-31",
+    },
+    {
+        "userId": "backup.approver@meridian-motors.example",
+        "role": "approver",
+        "plant": "1010",
+        "limitUsd": Decimal("100000"),
+        "validFrom": "2026-01-01",
+        "validTo": "9999-12-31",
+    },
 )

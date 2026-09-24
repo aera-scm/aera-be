@@ -1,0 +1,39 @@
+{
+  "name": "aera-sap-mirror",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OData V2 service with the S/4HANA API schema for AERA writes (IR-02)",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "cds-serve",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.mjs\""
+  },
+  "dependencies": {
+    "@cap-js-community/odata-v2-adapter": "1.16.1",
+    "@cap-js/sqlite": "3.1.1",
+    "@sap/cds": "10.1.1",
+    "express": "5.2.1"
+  },
+  "cds": {
+    "requires": {
+      "db": {
+        "kind": "sqlite",
+        "credentials": {
+          "url": ":memory:"
+        }
+      },
+      "auth": {
+        "kind": "dummy"
+      }
+    },
+    "cov2ap": {
+      "path": "sap/opu/odata/sap"
+    },
+    "i18n": {
+      "default_language": "en"
+    }
+  }
+}

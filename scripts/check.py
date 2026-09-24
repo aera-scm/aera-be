@@ -28,11 +28,15 @@ def check(name: str) -> None:
             run("pytest")
         else:
             print("No unit or contract tests exist yet; no application test coverage is claimed.")
+        if (ROOT / "sap-mirror" / "package.json").exists():
+            run("pnpm", "--dir", "sap-mirror", "test")
     elif name == "secrets":
         run(sys.executable, "scripts/security.py")
     elif name == "audit":
         run("pip-audit", "--local")
         run("pnpm", "audit", "--audit-level", "low")
+        if (ROOT / "sap-mirror" / "package.json").exists():
+            run("pnpm", "--dir", "sap-mirror", "audit", "--audit-level", "low")
     else:
         raise ValueError(f"Unknown check: {name}")
 

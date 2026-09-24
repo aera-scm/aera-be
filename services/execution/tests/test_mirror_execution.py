@@ -7,6 +7,10 @@ import pytest
 from services.execution.journal import Journal
 from services.execution.ledger import Ledger
 from services.execution.sap import LINE, PO, SapBoundary
+
+# Writes go to a Mirror of this module's own, reset before each test; the session Mirror
+# the read-only tests share must never see them.
+from services.execution.tests.test_service import mirror, sap  # noqa: F401 - fixtures
 from services.execution.tests.test_workflow import sample
 from services.execution.workflow import Execution, Workflow
 from services.shared.models import SplitPoScheduleLine
@@ -15,7 +19,9 @@ from services.shared.sap_client import SapClient
 
 @pytest.mark.parametrize("split", [False, True])
 def test_AT_06_AT_07_STO_date_change_and_rollback_on_local_mirror(
-    sap: SapClient, dynamodb: Any, split: bool
+    sap: SapClient,  # noqa: F811
+    dynamodb: Any,
+    split: bool,
 ) -> None:
     writer = SapClient(read=sap.read, write=sap.read)
     header = writer.get(PO, "A_PurchaseOrder", {"PurchaseOrder": "4500001234"})

@@ -2,8 +2,8 @@
 
 One definition serves the AgentCore Gateway targets (each tool its own Lambda and read-only
 role) and local runs. Deliberately absent: any tool that writes to SAP, sends a message or
-changes configuration (confused-deputy defence). Tools of later milestones (simulate_plan,
-get_supplier_reliability, request_supplier_info, request_replan) are not registered yet.
+changes configuration (confused-deputy defence). Tools of later milestones
+(get_supplier_reliability, request_supplier_info, request_replan) are not registered yet.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from services.tools import calc, case_tools, sap_tools
+from services.tools import calc, case_tools, sap_tools, simulate
 from services.tools.context import ToolContext, ToolError
 
 
@@ -122,6 +122,15 @@ TOOLS: tuple[ToolSpec, ...] = (
         {"caseId": S, "actionType": S, "params": {"type": "object"}},
         ("caseId", "actionType", "params"),
         calc.calc_option,
+    ),
+    ToolSpec(
+        "simulate_plan",
+        "Projected stock per plant (hourly 72 h, daily 30 days) for the baseline, each option "
+        "and all options together: stock-outs, line stops and orders affected. options: "
+        "[{id, actionType, params}] as for calc_option. Read-only.",
+        {"caseId": S, "options": {"type": "array", "items": {"type": "object"}}},
+        ("caseId", "options"),
+        simulate.simulate_plan,
     ),
     ToolSpec(
         "ask_planner",

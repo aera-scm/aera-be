@@ -52,6 +52,10 @@ class Donor:
     consumption_per_hour: Decimal
     customer_commitments: Decimal
     unreserved: Decimal
+    # FR-SIM-04: when the donor's projection after this transfer runs dry, and the end of
+    # the protected cover window; the projection must last at least that long.
+    projected_stockout: datetime | None = None
+    cover_until: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -175,9 +179,15 @@ def _donor_ok(donor: Donor | None, quantity: Decimal, minimum_cover: Decimal) ->
     ):
         return False
     left = donor.on_hand - quantity
+    projected = (
+        donor.projected_stockout is None
+        or donor.cover_until is None
+        or donor.projected_stockout >= donor.cover_until
+    )
     return (
         left >= donor.consumption_per_hour * 24 * minimum_cover
         and left >= donor.customer_commitments
+        and projected
     )
 
 

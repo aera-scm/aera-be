@@ -85,11 +85,6 @@ def _discrepancies(ctx: ToolContext, case: Any) -> list[dict[str, Any]]:
                 "used": "SAP",
             }
         )
-    for entry in found:
-        ctx.dynamodb.put_item(
-            TableName=table_name("cases", ctx.env),
-            Item=to_item({"PK": f"CASE#{case.case_id}", "SK": f"DISC#{entry['fieldId']}", **entry}),
-        )
     return found
 
 
@@ -100,9 +95,14 @@ def calc_impact(
     recovery_source_ref: str | None = None,
 ) -> dict[str, Any]:
     result = compute_impact(ctx, case_id, recovery_at, recovery_source_ref)
+    table = table_name("cases", ctx.env)
+    for entry in result["discrepancies"]:
+        ctx.dynamodb.put_item(
+            TableName=table,
+            Item=to_item({"PK": f"CASE#{case_id}", "SK": f"DISC#{entry['fieldId']}", **entry}),
+        )
     ctx.dynamodb.put_item(
-        TableName=table_name("cases", ctx.env),
-        Item=to_item({"PK": f"CASE#{case_id}", "SK": "IMPACT", **jsonable(result)}),
+        TableName=table, Item=to_item({"PK": f"CASE#{case_id}", "SK": "IMPACT", **jsonable(result)})
     )
     return json_dict(result)
 

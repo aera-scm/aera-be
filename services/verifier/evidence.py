@@ -18,6 +18,7 @@ from typing import Any
 
 from services.execution.ledger import Ledger
 from services.notifier.handler import INTERNAL_ROLES, partner_emails
+from services.optimizer.inputs import CaseProjector
 from services.rules.br_02 import usable
 from services.shared.dynamo import from_item, table_name
 from services.shared.models import Case, Option, ProposedPlan, SignalStatus
@@ -35,6 +36,15 @@ from services.verifier.logic import Corroboration, Donor, OptionEvidence
 
 MRP = "ZAERA_MIRROR_SRV"
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+@dataclass(frozen=True)
+class Source:
+    """How an option is recalculated: its tool parameters at the clock it was priced."""
+
+    action_type: str
+    params: dict[str, Any]
+    at: datetime
 
 
 @dataclass(frozen=True)
@@ -145,7 +155,13 @@ class EvidenceReader:
             emails |= partner_emails(self.ctx.sap, partner)
         return frozenset(emails)
 
-    def donor(self, material: str, plant: str, cover_days: Decimal) -> Donor:
+    def donor(
+        self,
+        material: str,
+        plant: str,
+        cover_days: Decimal,
+        projected_stockout: datetime | None = None,
+    ) -> Donor:
         position = stock_position(self.ctx, material, plant)
         per_hour = position["consumptionPerHour"] or Decimal(0)
         horizon = self.ctx.now() + timedelta(days=float(cover_days))
@@ -165,6 +181,8 @@ class EvidenceReader:
             consumption_per_hour=per_hour,
             customer_commitments=committed,
             unreserved=on_hand - held,
+            projected_stockout=projected_stockout,
+            cover_until=horizon,
         )
 
     # Per option ------------------------------------------------------------------------
@@ -196,19 +214,25 @@ class EvidenceReader:
         plants: frozenset[str],
         allowed: frozenset[str],
         cover_days: Decimal,
+        projector: CaseProjector | None = None,
+        source: Source | None = None,
     ) -> OptionEvidence | None:
-        draft = self._item(
-            case.case_id,
-            "DRAFT#" + draft_key(option.cost_usd, option.coverage_units, option.cost_source_ref),
-        )
-        if draft is None or "params" not in draft:
-            return None
-        try:
-            fresh, rate = compute_option(
-                _at(self.ctx, datetime.fromisoformat(str(draft["createdAt"]))),
+        if source is None:
+            draft = self._item(
                 case.case_id,
+                "DRAFT#"
+                + draft_key(option.cost_usd, option.coverage_units, option.cost_source_ref),
+            )
+            if draft is None or "params" not in draft:
+                return None
+            source = Source(
                 str(draft["actionType"]),
                 dict(draft["params"]),
+                datetime.fromisoformat(str(draft["createdAt"])),
+            )
+        try:
+            fresh, rate = compute_option(
+                _at(self.ctx, source.at), case.case_id, source.action_type, source.params
             )
         except ToolError:
             return None
@@ -224,9 +248,16 @@ class EvidenceReader:
             compliance[supplier_id] = str(record.get("ComplianceStatus") or "")
             if not record.get("PurchasingIsBlocked"):
                 suppliers.add(supplier_id)
+        # FR-SIM-04: the donor's projection with this transfer must outlast its cover window.
+        projections = projector.projections([option]) if projector else {}
         donors = {
             (action.material, action.from_plant): self.donor(
-                action.material, action.from_plant, cover_days
+                action.material,
+                action.from_plant,
+                cover_days,
+                projections[action.from_plant].first_stockout
+                if action.from_plant in projections
+                else None,
             )
             for action in option.actions
             if action.type == "CREATE_STO"
@@ -258,10 +289,16 @@ class EvidenceReader:
             calendar_feasible=True,
         )
 
-    def gather(self, case: Case, plan: ProposedPlan) -> Facts:
+    def gather(
+        self, case: Case, plan: ProposedPlan, sources: dict[str, Source] | None = None
+    ) -> Facts:
+        """`sources` recalculates options that have no draft (a what-if, FR-SIM-03)."""
         impact = self.impact(case)
         now = self.ctx.now()
-        need_at = impact["stockoutAt"] or now
+        # FR-SIM-04: V-03 compares arrivals with the projected stock-out at the case plant.
+        projector = CaseProjector(self.ctx, case)
+        projected = projector.projections([])[case.plant].first_stockout
+        need_at = projected or impact["stockoutAt"] or now
         plants = self.plants(case.material)
         allowed = self.allowed_recipients(case, plan)
         cover = self.ctx.config.decimal("DONOR_MIN_COVER_DAYS")
@@ -276,6 +313,8 @@ class EvidenceReader:
                 plants=plants,
                 allowed=allowed,
                 cover_days=cover,
+                projector=projector,
+                source=(sources or {}).get(option.id),
             )
             if facts is not None:
                 evidence[option.id] = facts

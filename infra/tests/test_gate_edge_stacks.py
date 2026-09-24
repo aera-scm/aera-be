@@ -155,6 +155,8 @@ def test_nfr_sec_04_console_routes_need_cognito_webhooks_need_signatures(
         ("POST", "/cases/{id}/rollback"): "COGNITO_USER_POOLS",
         ("POST", "/cases/{id}/chat"): "COGNITO_USER_POOLS",
         ("POST", "/cases/{id}/approval"): "COGNITO_USER_POOLS",
+        ("GET", "/cases/{id}/projection"): "COGNITO_USER_POOLS",
+        ("POST", "/cases/{id}/whatif"): "COGNITO_USER_POOLS",
         ("PUT", "/admin/config/{key}"): "COGNITO_USER_POOLS",
         ("POST", "/admin/killswitch"): "COGNITO_USER_POOLS",
         ("POST", "/admin/reset"): "COGNITO_USER_POOLS",

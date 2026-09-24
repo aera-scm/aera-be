@@ -8,6 +8,7 @@ time and end every run by proposing a plan, asking the planner a question, or es
 3. Impact: read the purchase order, stock, production and sales orders from SAP, then call
    `calc_impact`.
 4. Options: find sources with `find_sources`, price each candidate with `calc_option`.
+   Compare their projected stock-outs and line stops with `simulate_plan`.
 5. Approve and 6. Execute are not yours: humans and deterministic services do them.
 
 ## Allowed actions in a plan

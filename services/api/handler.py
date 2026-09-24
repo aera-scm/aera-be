@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from services.api import whatif
 from services.api.admin import Admin, AdminError
 from services.api.chat import Chat
 from services.routing.store import ApprovalConflict, ControlStore
@@ -46,6 +47,7 @@ from services.shared.models import (
 from services.shared.runtime import emit
 from services.shared.signals import SignalStore
 from services.shared.trace import TraceStore
+from services.tools.context import ToolContext
 
 COMPONENT = "api"
 READERS = frozenset({"planner", "approver", "admin"})
@@ -114,6 +116,7 @@ class Api:
     execution_arn: str = ""
     scan: Callable[[str], str | None] = lambda text: None
     admin: Admin | None = None
+    sap: Any = None  # SAP reads for projections and what-if (FR-SIM)
 
     def __post_init__(self) -> None:
         self.chat = Chat(self.dynamodb, self.bus, scan=self.scan, clock=self.clock, env=self.env)
@@ -171,6 +174,9 @@ class Api:
             return http.response(200, self.signal_list(http.query(event, "status")))
         if resource == "/metrics":
             return http.response(200, self.metrics())
+        if resource == "/cases/{id}/projection":
+            case = self._case(params["id"])
+            return self._sim(lambda ctx: whatif.projection(ctx, case, http.query(event, "option")))
         raise Problem(404, "Not found")
 
     def _post(
@@ -200,12 +206,34 @@ class Api:
             return http.response(200, self.confirm(params["id"], params["fieldId"], body, user))
         if resource == "/cases/{id}/runs":
             return self.start_run(params["id"], user)
+        if resource == "/cases/{id}/whatif":
+            case = self._case(params["id"])
+            option_id, changes = body.get("optionId"), body.get("params") or {}
+            if not isinstance(option_id, str) or not isinstance(changes, dict):
+                raise Problem(400, "optionId (string) and params (object) are required")
+            return self._sim(lambda ctx: whatif.whatif(ctx, case, option_id, changes))
         if resource == "/cases/{id}/chat":
             message = body.get("message")
             if not isinstance(message, str) or not message.strip():
                 raise Problem(400, "Missing message")
             return http.response(200, self.chat.handle(self._case(params["id"]), user.id, message))
         raise Problem(404, "Not found")
+
+    def _sim(self, action: Callable[[ToolContext], dict[str, Any]]) -> dict[str, Any]:
+        if self.sap is None:
+            raise Problem(503, "SAP reads are not configured in this environment")
+        ctx = ToolContext(
+            sap=self.sap,
+            dynamodb=self.dynamodb,
+            bus=self.bus,
+            clock=self.clock,
+            env=self.env,
+            actor="api",
+        )
+        try:
+            return http.response(200, action(ctx))
+        except whatif.WhatIfError as error:
+            raise Problem(400, "What-if refused", str(error)) from None
 
     def _admin(self, action: Callable[[Admin], dict[str, Any]]) -> dict[str, Any]:
         if self.admin is None:
@@ -605,6 +633,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             execution_arn=os.environ.get("AERA_EXECUTION_STATE_MACHINE_ARN", ""),
             scan=_guardrail_scan(runtime),
             admin=_admin_service(runtime, dynamodb),
+            sap=runtime.sap_client(),
         )
     return _api.handle(event)
 

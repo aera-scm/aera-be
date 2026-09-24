@@ -414,6 +414,7 @@ def test_srd_6_3_2_catalogue_is_read_only_or_proposal_only() -> None:
         "find_sources",
         "calc_impact",
         "calc_option",
+        "simulate_plan",
         "ask_planner",
         "propose_plan",
         "escalate",

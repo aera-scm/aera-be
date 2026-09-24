@@ -17,11 +17,12 @@ from decimal import Decimal
 from typing import Any
 
 from services.execution.ledger import Ledger
-from services.notifier.handler import INTERNAL_ROLES, partner_emails
+from services.notifier.handler import INTERNAL_ROLES
 from services.optimizer.inputs import CaseProjector
 from services.rules.br_02 import usable
 from services.shared.dynamo import from_item, table_name
 from services.shared.models import Case, Option, ProposedPlan, SignalStatus
+from services.shared.partner import partner_emails
 from services.shared.sap_client import SapNotFoundError
 from services.shared.triage import STOCK, odata_quote
 from services.tools.calc import compute_impact, compute_option, draft_key

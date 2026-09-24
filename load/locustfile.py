@@ -74,6 +74,22 @@ def _monitor(host: str) -> None:
             return
 
 
+def _settled_rows(host: str) -> list[dict[str, Any]]:
+    deadline = time.monotonic() + 60
+    while True:
+        rows = [
+            row
+            for status in ("RECEIVED", "ACCEPTED", "QUARANTINED")
+            for row in _rows(host, f"/signals?status={status}")
+        ]
+        report = LEDGER.report(rows, MIN_ACTIVE)
+        if not report["lostSignalIds"] and not report["unfinishedSignalIds"]:
+            return rows
+        if time.monotonic() >= deadline:
+            return rows
+        sleep(2)
+
+
 @events.test_start.add_listener  # type: ignore[untyped-decorator]
 def ready(environment: Environment, **_: Any) -> None:
     global ACTIVE_START, MIN_ACTIVE, MONITOR, STARTED_AT
@@ -96,14 +112,11 @@ def finished(environment: Environment, **_: Any) -> None:
 
     if MONITOR is not None:
         MONITOR.kill(block=True)
-    rows = [
-        row
-        for status in ("RECEIVED", "ACCEPTED", "QUARANTINED")
-        for row in _rows(environment.host, f"/signals?status={status}")
-    ]
+    load_duration = time.monotonic() - STARTED_AT
+    rows = _settled_rows(environment.host)
     report = LEDGER.report(rows, MIN_ACTIVE)
     report["runId"] = RUN_ID
-    report["durationSeconds"] = round(time.monotonic() - STARTED_AT, 1)
+    report["durationSeconds"] = round(load_duration, 1)
     report["signalsPerHour"] = round(
         3600 * report["submitted"] / max(1, report["durationSeconds"]), 1
     )

@@ -29,14 +29,6 @@ SEED = {
     "MAT-60417": ("4500001273", 250, "1000871"),
     "MAT-72055": ("4500001284", 1500, "1000234"),
 }
-ON_HAND = {
-    "MAT-48219": 310,
-    "MAT-51002": 900,
-    "MAT-33871": 400,
-    "MAT-20114": 120,
-    "MAT-60417": 700,
-    "MAT-72055": 2000,
-}
 CONTACTS = {
     "1000234": ("orders@krieger-guss.example", "+447700900234"),
     "1000871": ("sales@halim-presisi.example", "+447700900871"),
@@ -95,23 +87,12 @@ def mirror_changes(params: Parameters, now: datetime) -> list[dict[str, object]]
             ]
         )
     else:
-        changes.extend(
-            [
-                {
-                    "entity": "A_PurchaseOrderScheduleLine",
-                    "where": schedule_where,
-                    "set": {"ScheduleLineCommittedQuantity": str(remaining)},
-                },
-                {
-                    "entity": "A_MatlStkInAcctMod",
-                    "where": {"Material": params.material, "Plant": params.plant},
-                    "set": {
-                        "MatlWrhsStkQtyInMatlBaseUnit": str(
-                            max(0, ON_HAND[params.material] - params.quantity_short)
-                        )
-                    },
-                },
-            ]
+        changes.append(
+            {
+                "entity": "A_PurchaseOrderScheduleLine",
+                "where": schedule_where,
+                "set": {"ScheduleLineCommittedQuantity": str(remaining)},
+            }
         )
     if params.material != "MAT-48219":
         donor = {
@@ -178,8 +159,13 @@ def _text(params: Parameters, po: str, date: str) -> str:
             ),
         },
     }
+    affected = (
+        params.quantity_short
+        if params.exception_type == "QUANTITY_SHORTFALL"
+        else SEED[params.material][1]
+    )
     return words[params.exception_type][params.language].format(
-        po=po, material=params.material, qty=params.quantity_short, date=date
+        po=po, material=params.material, qty=affected, date=date
     )
 
 
@@ -220,10 +206,15 @@ def generate(params: Parameters, now: datetime, run_id: str) -> Artifacts:
     sender, phone = CONTACTS[supplier]
     date = (now.astimezone(UTC) + timedelta(days=params.days_late)).date().isoformat()
     text = _text(params, po, date)
+    affected = (
+        params.quantity_short
+        if params.exception_type == "QUANTITY_SHORTFALL"
+        else SEED[params.material][1]
+    )
     lines = [
         f"PO {po}",
         f"MATERIAL {params.material}",
-        f"QTY {params.quantity_short} PC",
+        f"QTY {affected} PC",
         f"DATE {date}",
     ]
     pdf = _pdf([text, *lines])

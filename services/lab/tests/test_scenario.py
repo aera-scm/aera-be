@@ -51,7 +51,7 @@ def test_fr_lab_02_mutation_tracks_selected_delay_and_shortage() -> None:
     assert not any(change["entity"] == "A_MatlStkInAcctMod" for change in changes)
     shortage = mirror_changes(params(exceptionType="QUANTITY_SHORTFALL"), NOW)
     assert shortage[0]["set"] == {"ScheduleLineCommittedQuantity": "1200"}
-    assert shortage[1]["set"] == {"MatlWrhsStkQtyInMatlBaseUnit": "0"}
+    assert not any(change["entity"] == "A_MatlStkInAcctMod" for change in shortage)
     assert not any(change["entity"] == "MRPExceptionMessage" for change in shortage)
     carrier = mirror_changes(params(exceptionType="CARRIER_DELAY"), NOW)
     assert carrier[0]["set"] == {"ScheduleLineDeliveryDate": "2026-10-08"}
@@ -83,3 +83,5 @@ def test_fr_lab_02_exception_artifacts_describe_distinct_disruptions() -> None:
     carrier = generate(params(exceptionType="CARRIER_DELAY"), NOW, "carrier")
     assert b"Quantity shortage" in shortage.email
     assert b"Carrier delay" in carrier.email
+    assert "400 units short" in shortage.text
+    assert "1600 units now arrive" in carrier.text

@@ -19,7 +19,8 @@ empty boxes are not acceptance evidence. Use synthetic Mirror data only.
    ```
 
    `load-result.json` records duration, signals/hour, minimum active cases, signal
-   accounting and request failures. Check `load-results_stats.csv` and cloud traces for
+   accounting, PO-to-case coalescing and request failures. It waits up to 60 seconds
+   after the load phase for intake to settle. Check `load-results_stats.csv` and cloud traces for
    ingestion-to-board p95 <= 15 s (including one-page Textract), ten warm reference
    agent runs p95 <= 90 s excluding human wait, and approval-to-verified-writes p95
    <= 30 s. A passing ledger alone does not establish AT-28.

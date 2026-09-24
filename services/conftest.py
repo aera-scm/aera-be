@@ -10,6 +10,8 @@ from moto import mock_aws
 from infra.stacks.data import TABLES
 
 ENV = "test"
+# CDK attribute types to DynamoDB API types.
+_KIND = {"STRING": "S", "NUMBER": "N", "BINARY": "B"}
 
 
 @pytest.fixture
@@ -34,10 +36,10 @@ def dynamodb(aws: None) -> Any:
         indexes = []
         for index in spec.indexes:
             index_keys = [{"AttributeName": index.partition[0], "KeyType": "HASH"}]
-            attributes[index.partition[0]] = "S" if index.partition[1].value == "S" else "N"
+            attributes[index.partition[0]] = _KIND[index.partition[1].value]
             if index.sort:
                 index_keys.append({"AttributeName": index.sort[0], "KeyType": "RANGE"})
-                attributes[index.sort[0]] = "S" if index.sort[1].value == "S" else "N"
+                attributes[index.sort[0]] = _KIND[index.sort[1].value]
             indexes.append(
                 {
                     "IndexName": index.name,

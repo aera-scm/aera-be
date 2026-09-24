@@ -90,7 +90,7 @@ class SignalStore:
         item = self._client.get_item(
             TableName=self._table, Key=_key(signal_id), ConsistentRead=True
         ).get("Item")
-        return None if item is None else self._signal(item)
+        return None if item is None else self.parse(item)
 
     def recent_for_po(self, po_number: str, since: datetime) -> list[Signal]:
         return self._query(
@@ -115,7 +115,7 @@ class SignalStore:
         }
         while True:
             page = self._client.query(**arguments)
-            signals.extend(self._signal(item) for item in page.get("Items", []))
+            signals.extend(self.parse(item) for item in page.get("Items", []))
             if "LastEvaluatedKey" not in page:
                 return signals
             arguments["ExclusiveStartKey"] = page["LastEvaluatedKey"]
@@ -126,7 +126,7 @@ class SignalStore:
         return to_item({"PK": f"SIG#{signal.signal_id}", "SK": _META, **record})
 
     @staticmethod
-    def _signal(item: dict[str, Any]) -> Signal:
+    def parse(item: dict[str, Any]) -> Signal:
         data = from_item(item, keep_decimals=False)
         data.pop("PK", None)
         data.pop("SK", None)

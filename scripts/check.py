@@ -25,7 +25,13 @@ def check(name: str) -> None:
         run("mypy", *[path for path in files if path.endswith(".py")])
     elif name == "test":
         if any(Path(path).match("test_*.py") or path.endswith("_test.py") for path in files):
-            run("pytest")
+            # NFR-MNT-01: at least 90% line coverage in the rules package.
+            run(
+                "pytest",
+                "--cov=services.rules",
+                "--cov-report=term-missing:skip-covered",
+                "--cov-fail-under=90",
+            )
         else:
             print("No unit or contract tests exist yet; no application test coverage is claimed.")
         if (ROOT / "sap-mirror" / "package.json").exists():

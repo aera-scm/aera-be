@@ -96,3 +96,19 @@ class Journal:
                 {":done": "SUCCEEDED", ":pending": "PENDING", ":result": result}
             ),
         )
+
+    def rejected(self, key: str) -> None:
+        self._transition(key, "PENDING", "REJECTED")
+
+    def mark_undone(self, key: str) -> None:
+        self._transition(key, "SUCCEEDED", "UNDONE")
+
+    def _transition(self, key: str, source: str, target: str) -> None:
+        self.client.update_item(
+            TableName=self.table,
+            Key={"PK": {"S": key}},
+            UpdateExpression="SET #status = :to",
+            ConditionExpression="#status = :from",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues=to_item({":to": target, ":from": source}),
+        )

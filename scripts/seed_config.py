@@ -122,6 +122,33 @@ def seed(client: DynamoDBClient, *, env_name: str, changed_at: str) -> SeedResul
     return SeedResult(written=written, preserved=preserved)
 
 
+REFERENCE_CASE_SEQUENCE = 913  # the next case opened is EXC-<year>-0914 (SRD 6.6.3)
+
+
+def seed_case_counter(client: DynamoDBClient, *, env_name: str, year: int) -> bool:
+    """Start the case counter so the reference case gets its SRD id; never lowers it."""
+    try:
+        require_deployable_environment(env_name)
+    except EnvironmentRefusedError as error:
+        raise SeedRefusedError(str(error)) from None
+    try:
+        client.put_item(
+            TableName=f"aera-{env_name}-cases",
+            Item={
+                "PK": {"S": f"COUNTER#CASE#{year}"},
+                "SK": {"S": "COUNTER"},
+                "seq": {"N": str(REFERENCE_CASE_SEQUENCE)},
+            },
+            ConditionExpression="attribute_not_exists(PK)",
+        )
+    except (ClientError, BotoCoreError) as error:
+        code = error_code(error)
+        if code != "ConditionalCheckFailedException":
+            raise SeedRefusedError(f"PutItem failed with {code} at the case counter") from None
+        return False
+    return True
+
+
 def open_client(profile: str, region: str) -> DynamoDBClient:
     return boto3.Session(profile_name=profile, region_name=region).client("dynamodb")
 
@@ -135,15 +162,24 @@ def main(
     parser.add_argument("--env", required=True)
     parser.add_argument("--profile", default=os.environ.get("AERA_AWS_PROFILE"))
     parser.add_argument("--region", default=os.environ.get("AERA_REGION", APPROVED_REGION))
+    parser.add_argument(
+        "--case-counter-year",
+        type=int,
+        help="also start that year's case counter so the reference case is EXC-<year>-0914",
+    )
     args = parser.parse_args(argv)
     if not args.profile:
         parser.error("--profile or AERA_AWS_PROFILE is required")
+    client = client_factory(args.profile, args.region)
     try:
         result = seed(
-            client_factory(args.profile, args.region),
+            client,
             env_name=args.env,
             changed_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         )
+        if args.case_counter_year:
+            started = seed_case_counter(client, env_name=args.env, year=args.case_counter_year)
+            print("case counter started" if started else "case counter already running")
     except SeedRefusedError as error:
         print(error, file=sys.stderr)
         return 1

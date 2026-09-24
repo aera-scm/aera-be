@@ -181,12 +181,13 @@ class ControlStack(Stack):
             env_name=env_name,
             component="notifier",
             code=code,
-            secrets=(MIRROR_SECRET, "channels/email-standins"),
+            secrets=(MIRROR_SECRET, "channels/email-standins", "channels/whatsapp"),
             parameters=("SAP_READ_BASE",),
         ).function
         for name in ("cases", "audit", "dialogue"):
             tables[name].grant_read_write_data(notifier)
         tables["config"].grant_read_data(notifier)
+        tables["signals"].grant_read_data(notifier)
         data.key.grant_encrypt_decrypt(notifier)
         notifier.add_to_role_policy(
             iam.PolicyStatement(

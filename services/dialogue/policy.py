@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
+
+from services.rules.br_04 import e164
 
 
 class Template(StrEnum):
@@ -50,6 +53,7 @@ class SupplierFacts:
     master_address: str
     language: Language
     source_ref: str
+    channel: Literal["EMAIL", "WHATSAPP"] = "EMAIL"
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,7 @@ class Question:
     rendered_text: str
     english_copy: str
     source_ref: str
+    channel: Literal["EMAIL", "WHATSAPP"] = "EMAIL"
 
 
 def _valid_po(value: str) -> bool:
@@ -96,7 +101,12 @@ def render_question(
         or not _valid_token(reference_token)
     ):
         raise ValueError("BR-19: question must use trusted case, open PO and master address")
-    if "@" not in facts.master_address or any(c.isspace() for c in facts.master_address):
+    valid_recipient = (
+        "@" in facts.master_address and not any(c.isspace() for c in facts.master_address)
+        if facts.channel == "EMAIL"
+        else e164(facts.master_address) == facts.master_address
+    )
+    if not valid_recipient:
         raise ValueError("BR-19: invalid master address")
     question = Question(
         facts.case_id,
@@ -109,6 +119,7 @@ def render_question(
         _render(Template(template), Language(facts.language), po_number, reference_token),
         _render(Template(template), Language.EN, po_number, reference_token),
         facts.source_ref,
+        facts.channel,
     )
     verify_v_14(question, facts)
     return question
@@ -124,6 +135,7 @@ def verify_v_14(question: Question, facts: SupplierFacts) -> None:
         or question.recipient != facts.master_address
         or question.language != facts.language
         or question.source_ref != facts.source_ref
+        or question.channel != facts.channel
         or not _valid_token(question.reference_token)
         or question.rendered_text
         != _render(question.template, facts.language, question.po_number, question.reference_token)

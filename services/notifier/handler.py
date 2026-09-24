@@ -24,6 +24,7 @@ from typing import Any
 from services.dialogue.facts import load_facts
 from services.dialogue.policy import Template, render_question
 from services.dialogue.thread import DialogueStatus, Thread, TimeoutAction, start, tick
+from services.notifier.whatsapp import WhatsAppDeliveryError, WhatsAppTemplateSender
 from services.shared.audit import AuditWriter
 from services.shared.cases import CaseStore, ConcurrentUpdateError
 from services.shared.config import Config
@@ -31,6 +32,7 @@ from services.shared.dynamo import from_item, table_name, to_item
 from services.shared.models import Case, CaseStatus
 from services.shared.partner import partner_emails
 from services.shared.sap_client import SapClient, SapNotFoundError
+from services.shared.signals import SignalStore
 
 PO = "API_PURCHASEORDER_PROCESS_SRV"
 # Internal roles as business partners in SAP master data (grouping INTL, ADR-0017).
@@ -79,11 +81,13 @@ class Notifier:
     ses: Any = None
     standins: Callable[[], dict[str, str]] = field(default=lambda: {})
     sender: Callable[[], str] = field(default=lambda: "")
+    whatsapp: WhatsAppTemplateSender | None = None
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
     env: str | None = None
 
     def __post_init__(self) -> None:
         self.cases = CaseStore(self.dynamodb, self.env)
+        self.signals = SignalStore(self.dynamodb, self.env)
         self.audit = AuditWriter(self.dynamodb, self.env)
         self._cases = table_name("cases", self.env)
         self._config = table_name("config", self.env)
@@ -103,7 +107,8 @@ class Notifier:
             return [{"status": "DUPLICATE"}]
         try:
             facts = load_facts(
-                self.cases, self.sap, case_id, expected_status=CaseStatus.WAITING_SUPPLIER
+                self.cases, self.sap, case_id, expected_status=CaseStatus.WAITING_SUPPLIER,
+                signals=self.signals,
             )
             expected = render_question(
                 facts, str(draft["poNumber"]), Template(str(draft["templateId"])),
@@ -112,6 +117,7 @@ class Notifier:
             if any((
                 draft.get("supplierId") != expected.supplier_id,
                 draft.get("recipient") != expected.recipient,
+                draft.get("channel", "EMAIL") != expected.channel,
                 draft.get("language") != expected.language.value,
                 draft.get("renderedText") != expected.rendered_text,
                 draft.get("englishCopy") != expected.english_copy,
@@ -135,9 +141,10 @@ class Notifier:
         except ValueError:
             self._block_dialogue(key, "no safe supplier reply window")
             return [{"status": "BLOCKED"}]
-        standin = self.standins().get(recipient)
-        sender = self.sender()
-        if not standin or not sender or self.ses is None:
+        standin = self.standins().get(recipient) if expected.channel == "EMAIL" else None
+        sender = self.sender() if expected.channel == "EMAIL" else None
+        if (expected.channel == "EMAIL" and (not standin or not sender or self.ses is None)
+                or expected.channel == "WHATSAPP" and self.whatsapp is None):
             self._block_dialogue(key, "no verified delivery stand-in")
             return [{"status": "BLOCKED"}]
         try:
@@ -153,14 +160,18 @@ class Notifier:
         except self.dynamodb.exceptions.ConditionalCheckFailedException:
             return [{"status": "DUPLICATE"}]
         try:
-            self.ses.send_email(
-                Source=sender,
-                Destination={"ToAddresses": [standin]},
-                Message={
-                    "Subject": {"Data": f"{case_id}: PO {expected.po_number} clarification"},
-                    "Body": {"Text": {"Data": expected.rendered_text}},
-                },
-            )
+            if expected.channel == "WHATSAPP":
+                assert self.whatsapp is not None
+                self.whatsapp.send_question(expected)
+            else:
+                self.ses.send_email(
+                    Source=sender,
+                    Destination={"ToAddresses": [standin]},
+                    Message={
+                        "Subject": {"Data": f"{case_id}: PO {expected.po_number} clarification"},
+                        "Body": {"Text": {"Data": expected.rendered_text}},
+                    },
+                )
         except Exception:  # noqa: BLE001 - ambiguous SES failure must not trigger a duplicate send
             self.dynamodb.update_item(
                 TableName=self._dialogue, Key=key,
@@ -296,23 +307,33 @@ class Notifier:
             return {"status": "UNCHANGED"}
         try:
             facts = load_facts(
-                self.cases, self.sap, case_id, expected_status=CaseStatus.WAITING_SUPPLIER
+                self.cases, self.sap, case_id, expected_status=CaseStatus.WAITING_SUPPLIER,
+                selected_channel=str(record.get("channel") or "EMAIL"),  # type: ignore[arg-type]
             )
             question = render_question(
                 facts, str(record["poNumber"]), Template(str(record["templateId"])),
                 str(record["referenceToken"]),
             )
-            standin = self.standins().get(question.recipient)
-            if not standin or question.rendered_text != record["renderedText"]:
-                return {"status": "BLOCKED"}
-            self.ses.send_email(
-                Source=self.sender(), Destination={"ToAddresses": [standin]},
-                Message={
-                    "Subject": {"Data": f"{case_id}: PO {question.po_number} clarification"},
-                    "Body": {"Text": {"Data": question.rendered_text}},
-                },
+            standin = (
+                self.standins().get(question.recipient) if question.channel == "EMAIL" else None
             )
-        except (KeyError, ValueError):
+            if question.rendered_text != record["renderedText"]:
+                return {"status": "BLOCKED"}
+            if question.channel == "WHATSAPP":
+                if self.whatsapp is None:
+                    return {"status": "BLOCKED"}
+                self.whatsapp.send_question(question)
+            else:
+                if not standin or not self.sender() or self.ses is None:
+                    return {"status": "BLOCKED"}
+                self.ses.send_email(
+                    Source=self.sender(), Destination={"ToAddresses": [standin]},
+                    Message={
+                        "Subject": {"Data": f"{case_id}: PO {question.po_number} clarification"},
+                        "Body": {"Text": {"Data": question.rendered_text}},
+                    },
+                )
+        except (KeyError, ValueError, WhatsAppDeliveryError):
             return {"status": "BLOCKED"}
         except Exception:  # noqa: BLE001 - claim prevents duplicate reminder on ambiguous failure
             return {"status": "BLOCKED"}
@@ -543,6 +564,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             ses=runtime.client("ses"),
             standins=standins,
             sender=sender,
+            whatsapp=WhatsAppTemplateSender(
+                config=lambda: runtime.secret("channels/whatsapp")
+            ),
         )
     data = dict((event.get("detail") or {}).get("data") or {})
     if event.get("task") == "dialogueSweep":

@@ -146,7 +146,7 @@ def request_supplier_info(
     if not isinstance(fields, dict) or set(fields) != {"poNumber"}:
         raise ToolError("supplier question fields may contain only poNumber")
     try:
-        facts = load_facts(ctx.cases, ctx.sap, case_id)
+        facts = load_facts(ctx.cases, ctx.sap, case_id, signals=ctx.signals)
         question = render_question(
             facts, str(fields["poNumber"]), Template(template_id), secrets.token_hex(12).upper()
         )
@@ -167,6 +167,7 @@ def request_supplier_info(
                 "templateId": question.template.value,
                 "poNumber": question.po_number,
                 "recipient": question.recipient,
+                "channel": question.channel,
                 "renderedText": question.rendered_text,
                 "englishCopy": question.english_copy,
                 "referenceToken": question.reference_token,

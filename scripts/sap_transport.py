@@ -6,7 +6,8 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 HOST = "sandbox.api.sap.com"
-BASE = "/s4hanacloud"
+# SAP Gateway path of the sandbox; without it the sandbox answers 404.
+BASE = "/s4hanacloud/sap/opu/odata/sap"
 APIS = (
     "API_PURCHASEORDER_PROCESS_SRV",
     "API_MATERIAL_STOCK_SRV",

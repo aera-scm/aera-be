@@ -135,3 +135,14 @@ def test_transport_exception_details_are_not_reported(error: Exception) -> None:
 def test_transport_rejects_unapproved_paths(path: str) -> None:
     with pytest.raises(SapError):
         get(path, "synthetic-test-value", "application/json")
+
+
+def test_ir_01_sandbox_urls_use_the_gateway_odata_path() -> None:
+    # The sandbox answers 404 "Unable to identify proxy" without /sap/opu/odata/sap.
+    from sap_transport import PATHS
+
+    assert smoke.PATH == (
+        "/s4hanacloud/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder?$top=5"
+    )
+    assert "/s4hanacloud/sap/opu/odata/sap/API_BUSINESS_PARTNER/$metadata" in PATHS
+    assert all(path.startswith("/s4hanacloud/sap/opu/odata/sap/") for path in PATHS)

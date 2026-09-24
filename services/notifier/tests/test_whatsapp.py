@@ -56,11 +56,14 @@ def test_v_14_whatsapp_refuses_modified_text_before_network() -> None:
     q = question()
     body = q.rendered_text.replace(q.po_number, "{po}").replace(q.reference_token, "{token}")
     calls: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"messages": [{"id": "x"}]})
+
     sender = WhatsAppTemplateSender(
         lambda: settings(body),
-        httpx.Client(transport=httpx.MockTransport(lambda request: (
-            calls.append(request) or httpx.Response(200, json={"messages": [{"id": "x"}]})
-        ))),
+        httpx.Client(transport=httpx.MockTransport(respond)),
     )
 
     with pytest.raises(WhatsAppDeliveryError, match="does not match"):

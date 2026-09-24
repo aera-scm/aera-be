@@ -3,6 +3,9 @@
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
 
+import pytest
+
+from services.optimizer.handler import lambda_handler
 from services.optimizer.solver import Candidate, Capacity, Need, solve
 
 NOW = datetime(2026, 10, 5, 8, tzinfo=UTC)
@@ -78,3 +81,43 @@ def test_nfr_perf_06_thirty_cases_two_hundred_candidates_under_five_seconds() ->
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert elapsed < 5, f"solver took {elapsed:.3f} s"
     assert sum(qty for _, qty in result.uncovered) == 0
+
+
+def test_internal_lambda_returns_only_a_candidate_allocation() -> None:
+    event = {
+        "needs": [
+            {
+                "caseId": "case-1",
+                "id": "order-1",
+                "due": "2026-10-05T16:00:00Z",
+                "quantity": 100,
+                "lostRevenueCentsPerUnit": 1000,
+                "sourceRef": "SAP:ORDER/QTY",
+            }
+        ],
+        "candidates": [
+            {
+                "caseId": "case-1",
+                "id": "sto-1",
+                "arrival": "2026-10-05T13:00:00Z",
+                "maxQuantity": 100,
+                "fixedCostCents": 0,
+                "unitCostCents": 10,
+                "resources": ["DONOR#MAT-A#1020"],
+                "sourceRef": "ratecard:STO-1",
+            }
+        ],
+        "capacities": [
+            {"resource": "DONOR#MAT-A#1020", "quantity": 100, "sourceRef": "SAP:STOCK/QTY"}
+        ],
+    }
+
+    result = lambda_handler(event, None)
+
+    assert result["status"] == "OPTIMAL"
+    assert result["allocations"][0]["quantity"] == 100
+    assert result["requiresVerification"] is True
+    with pytest.raises(ValueError, match="JSON integers"):
+        lambda_handler(
+            {**event, "capacities": [{**event["capacities"][0], "quantity": 99.5}]}, None
+        )

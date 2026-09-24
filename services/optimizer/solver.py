@@ -75,7 +75,12 @@ def _validate(needs: list[Need], candidates: list[Candidate], capacities: list[C
         raise ValueError("resource capacities must be unique")
     cases = {n.case_id for n in needs}
     for need in needs:
-        if need.quantity <= 0 or need.lost_revenue_cents_per_unit < 0 or not need.source_ref:
+        if (
+            need.quantity <= 0
+            or need.lost_revenue_cents_per_unit < 0
+            or not need.source_ref
+            or need.due.tzinfo is None
+        ):
             raise ValueError("need quantity, value and source must be valid")
     for action in candidates:
         if (
@@ -84,6 +89,8 @@ def _validate(needs: list[Need], candidates: list[Candidate], capacities: list[C
             or action.fixed_cost_cents < 0
             or action.unit_cost_cents < 0
             or not action.source_ref
+            or action.arrival.tzinfo is None
+            or not isinstance(action.sizeable, bool)
             or len(action.resources) != len(set(action.resources))
             or any(resource not in limits for resource in action.resources)
         ):

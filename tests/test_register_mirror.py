@@ -16,7 +16,7 @@ from botocore.stub import Stubber
 from register_mirror import CLIENT_VARIABLES, main
 
 URL = "https://aera-sap-mirror.cfapps.example"
-SECRET = "synthetic-client-secret-for-tests"
+SECRET = "synthetic-client-secret-for-tests"  # pragma: allowlist secret
 CLIENT = {
     "MIRROR_CLIENT_ID": "synthetic-client-id",
     "MIRROR_CLIENT_SECRET": SECRET,

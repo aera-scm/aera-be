@@ -161,6 +161,7 @@ class Webhooks:
                 normalized_text=_carrier_text(payload),
                 po_number=_text(payload.get("poNumber")),
                 material=_text(payload.get("material")),
+                received_at=datetime.fromtimestamp(self.clock(), UTC),
             )
         )
         return http.response(202, {"signalId": signal.signal_id})

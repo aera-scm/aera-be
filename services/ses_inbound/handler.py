@@ -9,7 +9,7 @@ so the gatekeeper can still see hidden HTML and SES's SPF/DKIM verdicts.
 from __future__ import annotations
 
 import email
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.policy import default
@@ -84,7 +84,12 @@ class SesInbound:
             bucket = record["s3"]["bucket"]["name"]
             key = unquote_plus(record["s3"]["object"]["key"])
             raw = self.s3.get_object(Bucket=bucket, Key=key)["Body"].read()
-            signals.append(self.intake.receive(to_inbound(raw)))
+            inbound = to_inbound(raw)
+            if record.get("eventTime"):
+                # The Date: header is the sender's claim; SES's receipt time is ours.
+                received = datetime.fromisoformat(str(record["eventTime"]).replace("Z", "+00:00"))
+                inbound = replace(inbound, received_at=received.astimezone(UTC))
+            signals.append(self.intake.receive(inbound))
         return signals
 
 

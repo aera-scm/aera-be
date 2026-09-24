@@ -71,13 +71,20 @@ def test_s3_notification_turns_each_stored_mail_into_a_signal(
         s3=s3,
     )
     event = {
-        "Records": [{"s3": {"bucket": {"name": RAW_BUCKET}, "object": {"key": "ses/abc%2B123"}}}]
+        "Records": [
+            {
+                "eventTime": "2026-10-05T07:59:30.000Z",
+                "s3": {"bucket": {"name": RAW_BUCKET}, "object": {"key": "ses/abc%2B123"}},
+            }
+        ]
     }
 
     [signal] = service.handle(event)
 
     stored = SignalStore(dynamodb, ENV).get(signal.signal_id)
     assert stored is not None and stored.channel.value == "EMAIL"
+    # Receipt time, not the sender's Date: header (06:40).
+    assert stored.received_at.isoformat() == "2026-10-05T07:59:30+00:00"
     assert (
         s3.get_object(Bucket=RAW_BUCKET, Key=stored.raw_s3_key)["Body"].read() == supplier_email()
     )

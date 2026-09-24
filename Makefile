@@ -1,4 +1,4 @@
-.PHONY: mirror-local mirror-model setup lint typecheck test scan audit check hooks check-budget check-region check-models seed-config provision-secrets budget bootstrap deploy
+.PHONY: mirror-local mirror-model register-mirror setup lint typecheck test scan audit check hooks check-budget check-region check-models seed-config provision-secrets budget bootstrap deploy
 
 # Deployment targets read AERA_AWS_PROFILE, AERA_REGION and AERA_BUDGET_* from the
 # environment. Only ENV=dev is accepted; the budget is verified before bootstrap.
@@ -62,3 +62,7 @@ mirror-local:
 # Regenerate the Mirror's S/4HANA entities from SAP's published schemas.
 mirror-model:
 	node sap-mirror/scripts/generate-model.mjs
+
+# After `cf deploy`: store the Mirror URL in SSM and its OAuth client in Secrets Manager.
+register-mirror:
+	uv run --locked python scripts/register_mirror.py --env $(ENV) --url $(URL)  # pragma: allowlist secret

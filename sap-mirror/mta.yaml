@@ -1,0 +1,52 @@
+# SAP BTP Cloud Foundry deployment of the SAP Mirror (SRD 6.16, OI-01).
+# Build: mbt build   Deploy: cf deploy mta_archives/aera-sap-mirror_0.0.0.mtar
+_schema-version: "3.2"
+ID: aera-sap-mirror
+version: 0.0.0
+description: OData V2 service with the S/4HANA API schema for AERA writes (IR-02)
+parameters:
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npm install --no-save @sap/cds-dk@10.1.2
+        - node scripts/fetch-sap-schemas.mjs
+        - node scripts/generate-model.mjs --check
+        - npx cds build --production
+modules:
+  - name: aera-sap-mirror-srv
+    type: nodejs
+    path: gen/srv
+    parameters:
+      buildpack: nodejs_buildpack
+      memory: 256M
+      disk-quota: 512M
+    properties:
+      NODE_ENV: production
+    requires:
+      - name: aera-sap-mirror-auth
+      - name: aera-sap-mirror-db
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+  - name: aera-sap-mirror-db-deployer
+    type: hdb
+    path: gen/db
+    parameters:
+      buildpack: nodejs_buildpack
+    requires:
+      - name: aera-sap-mirror-db
+resources:
+  - name: aera-sap-mirror-auth
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+  - name: aera-sap-mirror-db
+    type: com.sap.xs.hdi-container
+    parameters:
+      service: hana
+      service-plan: hdi-shared

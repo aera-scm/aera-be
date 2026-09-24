@@ -13,27 +13,41 @@
   },
   "dependencies": {
     "@cap-js-community/odata-v2-adapter": "1.16.1",
+    "@cap-js/hana": "3.1.1",
     "@cap-js/sqlite": "3.1.1",
     "@sap/cds": "10.1.1",
+    "@sap/xssec": "4.15.0",
     "express": "5.2.1"
   },
   "cds": {
-    "requires": {
-      "db": {
-        "kind": "sqlite",
-        "credentials": {
-          "url": ":memory:"
-        }
-      },
-      "auth": {
-        "kind": "dummy"
-      }
-    },
     "cov2ap": {
       "path": "sap/opu/odata/sap"
     },
     "i18n": {
       "default_language": "en"
+    },
+    "[development]": {
+      "requires": {
+        "db": {
+          "kind": "sqlite",
+          "credentials": {
+            "url": ":memory:"
+          }
+        },
+        "auth": {
+          "kind": "dummy"
+        }
+      }
+    },
+    "[production]": {
+      "requires": {
+        "db": {
+          "kind": "hana"
+        },
+        "auth": {
+          "kind": "xsuaa"
+        }
+      }
     }
   }
 }

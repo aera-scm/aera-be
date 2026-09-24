@@ -144,6 +144,7 @@ entity A_ProductionOrderComponent_2 {
 entity A_BusinessPartner {
   key BusinessPartner : String(10);
   Supplier : String(10);
+  CorrespondenceLanguage : String(2);
   BusinessPartnerCategory : String(1);
   BusinessPartnerGrouping : String(4);
   BusinessPartnerFullName : String(81);

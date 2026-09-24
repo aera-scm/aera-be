@@ -164,6 +164,7 @@
       "entities": {
         "A_BusinessPartner": [
           "Supplier",
+          "CorrespondenceLanguage",
           "BusinessPartnerCategory",
           "BusinessPartnerGrouping",
           "BusinessPartnerFullName",

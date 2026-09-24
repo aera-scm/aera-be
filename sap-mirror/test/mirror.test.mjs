@@ -71,6 +71,16 @@ describe("OData V2 contract (IR-02)", () => {
     }
   });
 
+  test("supplier correspondence language comes from SAP business-partner master", async () => {
+    const bp = `${V2}/API_BUSINESS_PARTNER`;
+    const german = await http.get(`${bp}/A_BusinessPartner('1000234')`);
+    const indonesian = await http.get(`${bp}/A_BusinessPartner('1000871')`);
+    assert.equal(german.status, 200);
+    assert.equal(german.data.d.CorrespondenceLanguage, "DE");
+    assert.equal(indonesian.status, 200);
+    assert.equal(indonesian.data.d.CorrespondenceLanguage, "ID");
+  });
+
   test("custom MRP and consumption entities and the compliance extension are served", async () => {
     const mrp = await http.get(`${V2}/ZAERA_MIRROR_SRV/MRPExceptionMessage?$inlinecount=allpages&$top=1`);
     assert.equal(mrp.status, 200);

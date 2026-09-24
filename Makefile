@@ -1,4 +1,4 @@
-.PHONY: mirror-local mirror-model register-mirror setup lint typecheck test scan audit check hooks check-budget check-region check-models seed-config provision-secrets budget bootstrap deploy
+.PHONY: types mirror-local mirror-model register-mirror setup lint typecheck test scan audit check hooks check-budget check-region check-models seed-config provision-secrets budget bootstrap deploy
 
 # Deployment targets read AERA_AWS_PROFILE, AERA_REGION and AERA_BUDGET_* from the
 # environment. Only ENV=dev is accepted; the budget is verified before bootstrap.
@@ -66,3 +66,10 @@ mirror-model:
 # After `cf deploy`: store the Mirror URL in SSM and its OAuth client in Secrets Manager.
 register-mirror:
 	uv run --locked python scripts/register_mirror.py --env $(ENV) --url $(URL)  # pragma: allowlist secret
+
+# Regenerate the console's API types from the shared Pydantic models.
+FE ?= ../aera-fe
+types:
+	mkdir -p build
+	uv run --locked python scripts/export_schemas.py > build/aera-contract.schema.json
+	node scripts/generate-types.mjs build/aera-contract.schema.json $(FE)/src/api/types.generated.ts

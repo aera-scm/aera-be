@@ -27,6 +27,7 @@ from typing import Any
 from services.api import whatif
 from services.api.admin import Admin, AdminError
 from services.api.chat import Chat
+from services.interop.logic import InteropRefused, authorize, rate_limit
 from services.lab.service import Lab, LabError, mirror_patch_via
 from services.reporting.decision import RecordUnavailable, collect, render_html, render_pdf
 from services.reporting.metrics import kpis
@@ -135,6 +136,8 @@ class Api:
 
     def handle(self, event: dict[str, Any]) -> dict[str, Any]:
         try:
+            if isinstance(event.get("serviceContext"), dict):
+                return self._service_request(event)
             user = _user(event)
             method = str(event.get("httpMethod"))
             resource = str(event.get("resource") or "")
@@ -162,6 +165,58 @@ class Api:
             raise Problem(405, "Method not allowed")
         except Problem as problem:
             return problem.response
+
+    def _service_request(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Only the interop Runtime role can invoke this Lambda directly in deployed IAM."""
+        context = event["serviceContext"]
+        operation = str(event.get("operation") or "")
+        client_id = str(context.get("clientId") or "")
+        try:
+            authorize(operation, client_id)
+            rate_limit(self.dynamodb, self.env or "dev", client_id)
+        except InteropRefused as error:
+            status = 429 if "rate limit" in str(error) else 403
+            raise Problem(status, "External agent request refused", str(error)) from None
+        payload = event.get("payload") or {}
+        if not isinstance(payload, dict):
+            raise Problem(400, "External agent payload must be an object")
+        if operation == "submit_exception_signal":
+            message_id, message = payload.get("messageId"), payload.get("text")
+            if (
+                not isinstance(message_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", message_id)
+                or not isinstance(message, str)
+                or not message.strip()
+                or len(message) > 10000
+            ):
+                raise Problem(400, "messageId and bounded text are required")
+            signal = self.intake.receive(
+                Inbound(
+                    channel=SignalChannel.AGENT,
+                    sender_id=f"agent:{client_id}",
+                    body=json.dumps(payload, sort_keys=True).encode(),
+                    content_type="application/json",
+                    normalized_text=message,
+                    dedup_key=f"{client_id}:{message_id}",
+                    po_number=str(payload["poNumber"]) if payload.get("poNumber") else None,
+                    material=str(payload["material"]) if payload.get("material") else None,
+                    actor="system",
+                )
+            )
+            return http.response(202, {"signalId": signal.signal_id, "status": "SUBMITTED_TO_GATE"})
+        if operation == "list_cases":
+            return http.response(200, self.board(None, None))
+        case_id = payload.get("caseId")
+        if not isinstance(case_id, str):
+            raise Problem(400, "caseId is required")
+        if operation == "get_case_status":
+            return http.response(200, self.case_detail(case_id))
+        try:
+            return http.response(
+                200, collect(self.dynamodb, self._case(case_id).case_id, self.env or "dev")
+            )
+        except RecordUnavailable as error:
+            raise Problem(409, "Decision record unavailable", str(error)) from None
 
     # Routing ----------------------------------------------------------------------------
 

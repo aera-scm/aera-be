@@ -109,6 +109,30 @@ class Gatekeeper:
             return signal  # unknown or already decided: redelivery is a no-op
         raw = self.raw.get(signal.raw_s3_key)
 
+        if signal.channel is SignalChannel.AGENT:
+            scan = self.guardrail.scan(signal.normalized_text or raw.decode("utf-8", "replace"))
+            if scan.blocked:
+                return self._quarantine(
+                    signal, scan.reason or "Guardrail blocked the text", guardrail="BLOCKED"
+                )
+            # OAuth verifies the agent identity, not any supplier it names in its text.
+            accepted = signal.model_copy(
+                update={
+                    "status": SignalStatus.ACCEPTED,
+                    "sender_verified": True,
+                    "guardrail_result": "PASSED",
+                }
+            )
+            self.signals.save(accepted)
+            emit(
+                self.bus,
+                "SignalAccepted",
+                {"signalId": signal.signal_id, "partnerId": None, "kind": "AGENT"},
+                component=COMPONENT,
+                environment=self.env,
+            )
+            return accepted
+
         channel = _sender_channel(signal)
         known = self.contacts()
         partner = verify_sender(channel, signal.sender_id, known)

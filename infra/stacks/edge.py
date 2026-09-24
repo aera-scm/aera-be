@@ -171,7 +171,10 @@ class EdgeStack(Stack):
         signed(case.add_resource("projection"), "GET")
         signed(case.add_resource("whatif"), "POST")
         admin = rest.root.add_resource("admin")
+        signed(admin.add_resource("settings"), "GET")
         signed(admin.add_resource("config").add_resource("{key}"), "PUT")
+        signed(admin.add_resource("rate-card").add_resource("{id}"), "PUT")
+        signed(admin.add_resource("approvers").add_resource("{id}"), "PUT")
         signed(admin.add_resource("killswitch"), "POST")
         signed(admin.add_resource("reset"), "POST")
         signed(

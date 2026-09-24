@@ -218,6 +218,99 @@ def test_fr_adm_01_threshold_edits_are_validated_and_audited(api: Api, dynamodb:
     assert changed.type == "CONFIG_CHANGED" and changed.actor == "user:u-1"
 
 
+def test_fr_ui_11_rate_card_and_approver_limits_are_editable_only_by_admin(
+    api: Api, dynamodb: Any
+) -> None:
+    rate = {
+        "entryId": "RC-STO-1020-1010",
+        "actionType": "STO",
+        "fromPlant": "1020",
+        "toPlant": "1010",
+        "unitCostUsd": 0,
+        "fixedCostUsd": 4100,
+        "leadTimeHours": 5,
+        "validFrom": "2026-01-01",
+        "validTo": "9999-12-31",
+    }
+    approver = {
+        "userId": "approver@meridian-motors.example",
+        "role": "approver",
+        "plant": "1010",
+        "limitUsd": 50000,
+        "validFrom": "2026-01-01",
+        "validTo": "9999-12-31",
+    }
+    for prefix, name, data in (
+        ("RATE", rate["entryId"], rate),
+        ("APPR", approver["userId"], approver),
+    ):
+        dynamodb.put_item(
+            TableName="aera-test-config", Item=to_item({"PK": f"{prefix}#{name}", **data})
+        )
+    denied = api.handle(call("GET", "/admin/settings", groups="planner", body={}))
+    settings = api.handle(call("GET", "/admin/settings", groups="admin", body={}))
+    assert denied["statusCode"] == 403
+    assert json.loads(settings["body"])["rateCard"][0]["fixedCostUsd"] == 4100
+
+    changed_rate = api.handle(
+        call(
+            "PUT",
+            "/admin/rate-card/{id}",
+            groups="admin",
+            body={**rate, "fixedCostUsd": 4200},
+            params={"id": rate["entryId"]},
+        )
+    )
+    bad_rate = api.handle(
+        call(
+            "PUT",
+            "/admin/rate-card/{id}",
+            groups="admin",
+            body={**rate, "fixedCostUsd": -1},
+            params={"id": rate["entryId"]},
+        )
+    )
+    changed_limit = api.handle(
+        call(
+            "PUT",
+            "/admin/approvers/{id}",
+            groups="admin",
+            body={**approver, "limitUsd": 75000},
+            params={"id": approver["userId"]},
+        )
+    )
+    denied_edit = api.handle(
+        call(
+            "PUT",
+            "/admin/approvers/{id}",
+            groups="planner",
+            body=approver,
+            params={"id": approver["userId"]},
+        )
+    )
+    bad_limit = api.handle(
+        call(
+            "PUT",
+            "/admin/approvers/{id}",
+            groups="admin",
+            body={**approver, "limitUsd": -1},
+            params={"id": approver["userId"]},
+        )
+    )
+    assert changed_rate["statusCode"] == changed_limit["statusCode"] == 200
+    assert bad_rate["statusCode"] == bad_limit["statusCode"] == 400
+    assert denied_edit["statusCode"] == 403
+    current = json.loads(
+        api.handle(call("GET", "/admin/settings", groups="admin", body={}))["body"]
+    )
+    assert current["rateCard"][0]["fixedCostUsd"] == 4200
+    assert current["approverLimits"][0]["limitUsd"] == 75000
+    assert [event.type for event in AuditWriter(dynamodb, ENV).events("ADMIN")] == [
+        "RATE_CARD_CHANGED",
+        "APPROVER_LIMIT_CHANGED",
+    ]
+
+
 def test_fr_adm_02_kill_switch_drops_to_advise_only(api: Api, dynamodb: Any) -> None:
     response = api.handle(call("POST", "/admin/killswitch", groups="admin", body={"on": True}))
     assert response["statusCode"] == 200

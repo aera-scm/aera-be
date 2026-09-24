@@ -143,13 +143,20 @@ class Api:
                 )
             if method == "GET":
                 return self._get(resource, params, event, user)
-            if method == "PUT" and resource == "/admin/config/{key}":
+            if method == "PUT" and resource.startswith("/admin/"):
                 _require(user, ADMINS)
-                return self._admin(
-                    lambda admin: admin.set_config(
-                        params["key"], _json_body(event).get("value"), f"user:{user.id}"
+                payload = _json_body(event)
+                actor = f"user:{user.id}"
+                if resource == "/admin/config/{key}":
+                    return self._admin(
+                        lambda admin: admin.set_config(params["key"], payload.get("value"), actor)
                     )
-                )
+                if resource == "/admin/rate-card/{id}":
+                    return self._admin(lambda admin: admin.set_rate(params["id"], payload, actor))
+                if resource == "/admin/approvers/{id}":
+                    return self._admin(
+                        lambda admin: admin.set_approver(params["id"], payload, actor)
+                    )
             raise Problem(405, "Method not allowed")
         except Problem as problem:
             return problem.response
@@ -203,6 +210,9 @@ class Api:
             return http.response(200, self.signal_list(http.query(event, "status")))
         if resource == "/metrics":
             return http.response(200, self.metrics())
+        if resource == "/admin/settings":
+            _require(user, ADMINS)
+            return self._admin(lambda admin: admin.settings())
         if resource == "/cases/{id}/projection":
             case = self._case(params["id"])
             return self._sim(lambda ctx: whatif.projection(ctx, case, http.query(event, "option")))

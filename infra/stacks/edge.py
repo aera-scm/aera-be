@@ -90,12 +90,21 @@ class EdgeStack(Stack):
             resource_name=f"aera-{env_name}-execution",
             arn_format=ArnFormat.COLON_RESOURCE_NAME,
         )
+        # The Mirror client serves the FR-ADM-03 reset.
         api_fn = function(
             "api",
             environment={**environment, "AERA_EXECUTION_STATE_MACHINE_ARN": execution_arn},
+            secrets=("sap/mirror-oauth-client",),
         )
         api_fn.add_to_role_policy(
             iam.PolicyStatement(actions=["states:StartExecution"], resources=[execution_arn])
+        )
+        # FR-CHT-04 chat scan; the Guardrail lives in the gate stack, so match by account.
+        api_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:ApplyGuardrail"],
+                resources=[self.format_arn(service="bedrock", resource="guardrail/*")],
+            )
         )
         webhooks = function(
             "webhooks",
@@ -109,7 +118,8 @@ class EdgeStack(Stack):
             raw.grant_read_write(fn)
             tables["signals"].grant_read_write_data(fn)
             tables["idempotency"].grant_read_write_data(fn)
-        for name in ("cases", "audit", "trace", "connections"):
+        # Admin (FR-ADM-01..03) edits config and resets the working tables; audit is kept.
+        for name in ("cases", "audit", "trace", "connections", "config", "ledger", "dialogue"):
             tables[name].grant_read_write_data(api_fn)
         tables["connections"].grant_read_write_data(realtime)
 
@@ -153,6 +163,11 @@ class EdgeStack(Stack):
         signed(case.add_resource("trace"), "GET")
         signed(case.add_resource("runs"), "POST")
         signed(case.add_resource("rollback"), "POST")
+        signed(case.add_resource("chat"), "POST")
+        admin = rest.root.add_resource("admin")
+        signed(admin.add_resource("config").add_resource("{key}"), "PUT")
+        signed(admin.add_resource("killswitch"), "POST")
+        signed(admin.add_resource("reset"), "POST")
         signed(
             case.add_resource("fields").add_resource("{fieldId}").add_resource("confirm"), "POST"
         )

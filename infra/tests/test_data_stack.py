@@ -314,6 +314,7 @@ def test_nfr_sec_03_empty_secret_containers_for_sandbox_and_mirror(
 
     assert sorted(found) == [
         "/aera/dev/channels/carrier-webhook",
+        "/aera/dev/channels/email-standins",
         "/aera/dev/channels/whatsapp",
         "/aera/dev/sap/mirror-oauth-client",
         "/aera/dev/sap/sandbox-api-key",
@@ -333,6 +334,7 @@ def test_nfr_sec_03_existing_approved_secret_is_referenced_not_duplicated() -> N
 
     assert sorted(secrets(template(settings))) == [
         "/aera/dev/channels/carrier-webhook",
+        "/aera/dev/channels/email-standins",
         "/aera/dev/channels/whatsapp",
         "/aera/dev/sap/mirror-oauth-client",
     ]
@@ -370,7 +372,7 @@ def test_srd_6_16_every_taggable_resource_carries_required_tags(
     resources = data.to_json()["Resources"]
     tagged = [r for r in resources.values() if r["Type"] in TAGGED_TYPES]
 
-    assert len(tagged) == 10 + 3 + 1 + 1 + 8 + 2
+    assert len(tagged) == 10 + 3 + 1 + 1 + 8 + 3
     for resource in tagged:
         assert REQUIRED_TAGS.items() <= resource_tags(resource).items(), resource["Type"]
 

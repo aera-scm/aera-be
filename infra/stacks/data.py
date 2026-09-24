@@ -168,6 +168,7 @@ class DataStack(Stack):
             ("sap", "mirror-oauth-client", "SAP Mirror OAuth client credentials (IR-02)"),
             ("channels", "whatsapp", "WhatsApp app secret, verify and access token (IR-07)"),
             ("channels", "carrier-webhook", "Carrier webhook HMAC keys by carrier id (IR-08)"),
+            ("channels", "email-standins", "Verified stand-in addresses and sender (FR-COM-04)"),
         ):
             if component in existing:
                 continue

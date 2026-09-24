@@ -119,3 +119,32 @@ def test_outbox_relay_reads_only_outbox_inserts(templates: dict[str, assertions.
         "eventName": ["INSERT"],
         "dynamodb": {"Keys": {"SK": {"S": [{"prefix": "OUTBOX#"}]}}},
     }
+
+
+def test_fr_com_02_only_the_notifier_can_send_mail(
+    templates: dict[str, assertions.Template],
+) -> None:
+    senders = [
+        name
+        for name, template in templates.items()
+        for policy in template.find_resources("AWS::IAM::Policy").values()
+        if "ses:SendEmail" in json.dumps(policy)
+    ]
+    assert senders == ["control"]
+    [policy] = [
+        p
+        for p in templates["control"].find_resources("AWS::IAM::Policy").values()
+        if "ses:SendEmail" in json.dumps(p)
+    ]
+    assert "notifier" in json.dumps(policy["Properties"]["Roles"]).lower()
+
+
+def test_notifier_and_monitor_listen_on_the_bus(
+    templates: dict[str, assertions.Template],
+) -> None:
+    rules = {
+        r["Properties"]["Name"]: r["Properties"]["EventPattern"]["detail-type"]
+        for r in templates["control"].find_resources("AWS::Events::Rule").values()
+    }
+    assert rules["aera-dev-notifier"] == ["NotificationRequested"]
+    assert rules["aera-dev-monitor"] == ["GoodsReceiptDue"]

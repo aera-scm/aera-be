@@ -174,5 +174,55 @@ class ControlStack(Stack):
                 ],
             )
         )
+        # Notifier: the only function allowed to send (FR-COM-02, BR-03).
+        notifier = ServiceFunction(
+            self,
+            "notifier",
+            env_name=env_name,
+            component="notifier",
+            code=code,
+            secrets=(MIRROR_SECRET, "channels/email-standins"),
+            parameters=("SAP_READ_BASE",),
+        ).function
+        for name in ("cases", "audit"):
+            tables[name].grant_read_write_data(notifier)
+        tables["config"].grant_read_data(notifier)
+        data.key.grant_encrypt_decrypt(notifier)
+        notifier.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["ses:SendEmail"],
+                resources=[self.format_arn(service="ses", resource="identity", resource_name="*")],
+            )
+        )
+        monitor = ServiceFunction(
+            self,
+            "monitor",
+            env_name=env_name,
+            component="monitor",
+            code=code,
+            secrets=(MIRROR_SECRET,),
+            parameters=("SAP_READ_BASE",),
+        ).function
+        for name in ("cases", "audit", "signals"):
+            tables[name].grant_read_write_data(monitor)
+        tables["idempotency"].grant_read_data(monitor)
+        data.bus.grant_put_events_to(monitor)
+        data.key.grant_encrypt_decrypt(monitor)
+        for name, fn, detail_type in (
+            ("Notifier", notifier, "NotificationRequested"),
+            ("Monitor", monitor, "GoodsReceiptDue"),
+        ):
+            events.Rule(
+                self,
+                f"On{name}",
+                rule_name=f"aera-{env_name}-{name.lower()}",
+                event_bus=data.bus,
+                event_pattern=events.EventPattern(
+                    source=events.Match.prefix("aera."), detail_type=[detail_type]
+                ),
+                targets=[
+                    targets.LambdaFunction(fn, retry_attempts=8, dead_letter_queue=dead_letters)
+                ],
+            )
         self.state_machine = machine
         self.execution_function = execution

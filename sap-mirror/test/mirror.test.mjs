@@ -272,6 +272,16 @@ describe("Reset (FR-ADM-03)", () => {
         where: { PurchasingDocument: "4500001234", PurchasingDocumentItem: "10", ScheduleLine: "1" },
         set: { ScheduleLineDeliveryDate: "{T0+3d}" },
       },
+      {
+        entity: "A_MatlStkInAcctMod",
+        where: { Material: "MAT-51002", Plant: "1020", StorageLocation: "102A", InventoryStockType: "01" },
+        set: { MatlWrhsStkQtyInMatlBaseUnit: "1200" },
+        insert: { Material: "MAT-51002", Plant: "1020", StorageLocation: "102A",
+          Batch: "", Supplier: "", Customer: "", WBSElementInternalID: "",
+          SDDocument: "", SDDocumentItem: "", InventorySpecialStockType: "",
+          InventoryStockType: "01", MaterialBaseUnit: "PC", MatlWrhsStkQtyInMatlBaseUnit: "1200" },
+        upsert: true,
+      },
     ];
 
     const applied = await http.post("/admin/patch", { changes: JSON.stringify(changes) }, headers);
@@ -279,6 +289,12 @@ describe("Reset (FR-ADM-03)", () => {
     const quantity = async () =>
       Number((await http.get(stock)).data.d.results[0].MatlWrhsStkQtyInMatlBaseUnit);
     assert.equal(await quantity(), 150);
+    const donor = `${V2}/API_MATERIAL_STOCK_SRV/A_MatlStkInAcctMod?$filter=Material eq 'MAT-51002' and Plant eq '1020'&$format=json`;
+    const donorRows = async () => (await http.get(donor)).data.d.results;
+    assert.equal((await donorRows()).length, 1);
+    const again = await http.post("/admin/patch", { changes: JSON.stringify([changes[3]]) }, headers);
+    assert.equal(again.status, 200);
+    assert.equal((await donorRows()).length, 1);
     const line = await http.get(
       `${PO}/A_PurchaseOrderScheduleLine(PurchasingDocument='4500001234',PurchasingDocumentItem='10',ScheduleLine='1')`,
     );
@@ -292,6 +308,7 @@ describe("Reset (FR-ADM-03)", () => {
     assert.equal(unknown.status, 400);
     await reset();
     assert.equal(await quantity(), 310);
+    assert.equal((await donorRows()).length, 0);
   });
 
   test("reset rejects a malformed scenario start", async () => {

@@ -90,16 +90,30 @@ def mirror_changes(params: Parameters, now: datetime) -> list[dict[str, object]]
         },
     ]
     if params.material != "MAT-48219":
+        donor = {
+            "Material": params.material,
+            "Plant": "1020",
+            "StorageLocation": "102A",
+            "InventoryStockType": "01",
+        }
+        quantity = str(max(1200, params.quantity_short + 200))
         changes.append(
             {
                 "entity": "A_MatlStkInAcctMod",
+                "where": donor,
+                "set": {"MatlWrhsStkQtyInMatlBaseUnit": quantity},
+                "upsert": True,
                 "insert": {
-                    "Material": params.material,
-                    "Plant": "1020",
-                    "StorageLocation": "102A",
-                    "InventoryStockType": "01",
+                    **donor,
+                    "Batch": "",
+                    "Supplier": "",
+                    "Customer": "",
+                    "WBSElementInternalID": "",
+                    "SDDocument": "",
+                    "SDDocumentItem": "",
+                    "InventorySpecialStockType": "",
                     "MaterialBaseUnit": "PC",
-                    "MatlWrhsStkQtyInMatlBaseUnit": str(max(1200, params.quantity_short + 200)),
+                    "MatlWrhsStkQtyInMatlBaseUnit": quantity,
                 },
             }
         )

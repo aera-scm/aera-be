@@ -143,7 +143,12 @@ async function patch(changes, t0) {
       const where = `change ${index}`;
       const entity = mirrorEntity(change.entity);
       const match = values(entity, change.where, t0, where);
-      if (change.insert) {
+      if (change.upsert === true && change.insert && change.set && Object.keys(match).length) {
+        const count = await tx.run(
+          UPDATE(entity).set(values(entity, change.set, t0, where)).where(match),
+        );
+        if (!count) await tx.run(INSERT.into(entity).entries(values(entity, change.insert, t0, where)));
+      } else if (change.insert) {
         await tx.run(INSERT.into(entity).entries(values(entity, change.insert, t0, where)));
       } else if (change.remove === true && Object.keys(match).length) {
         await tx.run(DELETE.from(entity).where(match));

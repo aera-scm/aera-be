@@ -113,4 +113,52 @@ async function reset(t0) {
   return { t0: t0.toISOString(), rows, durationMs: Date.now() - started };
 }
 
-module.exports = { reset, load, parseCsv, offsetMs };
+// Evaluation patches (WP-13): entity names are the S/4 or Mirror entity names, e.g.
+// A_MatlStkInAcctMod or MaterialConsumptionRate; T0 tokens resolve against the last reset.
+function mirrorEntity(name) {
+  const entity =
+    cds.model.definitions[`aera.mirror.s4.${name}`] ??
+    cds.model.definitions[`aera.mirror.${name}`];
+  if (!entity || entity.kind !== "entity" || entity.query) {
+    throw new Error(`unknown entity ${name}`);
+  }
+  return entity;
+}
+
+function values(entity, row, t0, where) {
+  return Object.fromEntries(
+    Object.entries(row ?? {}).map(([field, raw]) => {
+      const element = entity.elements[field];
+      if (!element) throw new Error(`${where}: ${entity.name} has no field ${field}`);
+      return [field, convert(String(raw), element, t0, `${where}:${field}`)];
+    }),
+  );
+}
+
+async function patch(changes, t0) {
+  if (!Array.isArray(changes)) throw new Error("changes must be a JSON list");
+  let applied = 0;
+  await cds.tx(async (tx) => {
+    for (const [index, change] of changes.entries()) {
+      const where = `change ${index}`;
+      const entity = mirrorEntity(change.entity);
+      const match = values(entity, change.where, t0, where);
+      if (change.insert) {
+        await tx.run(INSERT.into(entity).entries(values(entity, change.insert, t0, where)));
+      } else if (change.remove === true && Object.keys(match).length) {
+        await tx.run(DELETE.from(entity).where(match));
+      } else if (change.set && Object.keys(match).length) {
+        const count = await tx.run(
+          UPDATE(entity).set(values(entity, change.set, t0, where)).where(match),
+        );
+        if (!count) throw new Error(`${where}: no ${change.entity} row matches`);
+      } else {
+        throw new Error(`${where}: needs insert, set with where, or remove with where`);
+      }
+      applied += 1;
+    }
+  });
+  return { applied };
+}
+
+module.exports = { reset, load, parseCsv, offsetMs, patch };

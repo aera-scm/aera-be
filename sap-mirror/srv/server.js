@@ -1,7 +1,7 @@
 // SAP Mirror server (SRD 6.6, IR-02): S/4HANA-shaped write behaviour on top of CAP.
 const cds = require("@sap/cds");
 const { csrf } = require("./csrf");
-const { reset } = require("./seed");
+const { patch, reset } = require("./seed");
 
 // The V2 adapter reads the raw language header; `Accept-Language: *` (sent by default by
 // Node's fetch, among others) would make it localize $metadata for every locale at once
@@ -14,6 +14,7 @@ cds.i18n.locale.header = (request) => {
 
 // AT-08 fault injection, armed only through the admin service (MirrorAdmin scope).
 const fault = { skip: 0, count: 0, status: 500 };
+let lastStart = null; // T0 of the last reset; evaluation patches resolve tokens against it
 const WRITES = new Set(["POST", "PATCH", "MERGE", "PUT", "DELETE"]);
 
 const PURCHASE_ORDER_RANGE = { first: 4500000000, last: 4599999999 };
@@ -123,7 +124,22 @@ cds.on("served", async (services) => {
     const t0 = scenarioStart(request.data.t0);
     if (!t0) return request.reject(400, "t0 must be an ISO-8601 timestamp");
     Object.assign(fault, { skip: 0, count: 0, status: 500 });
+    lastStart = t0;
     return reset(t0);
+  });
+
+  services.MirrorAdminService.on("patch", async (request) => {
+    let changes;
+    try {
+      changes = JSON.parse(request.data.changes ?? "");
+    } catch {
+      return request.reject(400, "changes must be JSON");
+    }
+    try {
+      return await patch(changes, lastStart ?? scenarioStart() ?? new Date());
+    } catch (error) {
+      return request.reject(400, error.message);
+    }
   });
 
   services.MirrorAdminService.on("fault", (request) => {
@@ -139,7 +155,10 @@ cds.on("served", async (services) => {
   });
 
   const [any] = await SELECT.from(`${s4}.A_PurchaseOrder`).limit(1);
-  if (!any) await reset(scenarioStart() ?? new Date());
+  if (!any) {
+    lastStart = scenarioStart() ?? new Date();
+    await reset(lastStart);
+  }
 });
 
 module.exports = cds.server;

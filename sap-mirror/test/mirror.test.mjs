@@ -242,6 +242,48 @@ describe("Reset (FR-ADM-03)", () => {
     assert.equal(refused.status, 400);
   });
 
+  test("evaluation patches adjust the seed with T0 tokens and reset restores it", async () => {
+    await reset();
+    const headers = await csrf();
+    const stock = `${V2}/API_MATERIAL_STOCK_SRV/A_MatlStkInAcctMod?$filter=Material eq 'MAT-48219' and Plant eq '1010'&$format=json`;
+    const changes = [
+      {
+        entity: "A_MatlStkInAcctMod",
+        where: { Material: "MAT-48219", Plant: "1010", InventoryStockType: "01" },
+        set: { MatlWrhsStkQtyInMatlBaseUnit: "150" },
+      },
+      {
+        entity: "A_Supplier",
+        where: { Supplier: "1000871" },
+        set: { ComplianceStatus: "APPROVED" },
+      },
+      {
+        entity: "A_PurchaseOrderScheduleLine",
+        where: { PurchasingDocument: "4500001234", PurchasingDocumentItem: "10", ScheduleLine: "1" },
+        set: { ScheduleLineDeliveryDate: "{T0+3d}" },
+      },
+    ];
+
+    const applied = await http.post("/admin/patch", { changes: JSON.stringify(changes) }, headers);
+    assert.equal(applied.status, 200, JSON.stringify(applied.data));
+    const quantity = async () =>
+      Number((await http.get(stock)).data.d.results[0].MatlWrhsStkQtyInMatlBaseUnit);
+    assert.equal(await quantity(), 150);
+    const line = await http.get(
+      `${PO}/A_PurchaseOrderScheduleLine(PurchasingDocument='4500001234',PurchasingDocumentItem='10',ScheduleLine='1')`,
+    );
+    assert.equal(line.data.d.ScheduleLineDeliveryDate, epoch("2026-10-08T00:00:00.000Z"));
+
+    const unknown = await http.post(
+      "/admin/patch",
+      { changes: JSON.stringify([{ entity: "Nope", where: { A: "1" }, set: { B: "2" } }]) },
+      headers,
+    );
+    assert.equal(unknown.status, 400);
+    await reset();
+    assert.equal(await quantity(), 310);
+  });
+
   test("reset rejects a malformed scenario start", async () => {
     const headers = await csrf();
     const response = await http.post("/admin/reset", { t0: "yesterday" }, headers);

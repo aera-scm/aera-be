@@ -73,4 +73,10 @@ service MirrorAdminService {
     count  : Integer;
     status : Integer;
   };
+  // Evaluation cases (WP-13) adjust the reset seed: a JSON list of {entity, where, set}
+  // updates, {entity, insert} rows or {entity, where, remove: true}. Values may use T0
+  // tokens such as {T0+6h}; the next reset restores the reference seed.
+  action patch(changes : LargeString) returns {
+    applied : Integer;
+  };
 }

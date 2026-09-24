@@ -224,6 +224,26 @@ class ControlStack(Stack):
                 targets.LambdaFunction(replies, retry_attempts=8, dead_letter_queue=dead_letters)
             ],
         )
+        reliability = ServiceFunction(
+            self,
+            "reliability",
+            env_name=env_name,
+            component="reliability",
+            code=code,
+            secrets=(MIRROR_SECRET,),
+            parameters=("SAP_READ_BASE",),
+            timeout=Duration.minutes(5),
+        ).function
+        tables["analytics"].grant_read_write_data(reliability)
+        data.key.grant_decrypt(reliability)
+        events.Rule(
+            self,
+            "DailyReliabilityRefresh",
+            rule_name=f"aera-{env_name}-reliability-refresh",
+            schedule=events.Schedule.rate(Duration.days(1)),
+            targets=[targets.LambdaFunction(reliability, retry_attempts=3,
+                                            dead_letter_queue=dead_letters)],
+        )
         monitor = ServiceFunction(
             self,
             "monitor",

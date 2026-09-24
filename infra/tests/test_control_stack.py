@@ -86,6 +86,19 @@ def test_plan_approved_starts_the_standard_state_machine(
     assert rule["Properties"]["EventPattern"]["detail-type"] == ["PlanApproved"]
 
 
+def test_fr_lrn_01_reliability_refresh_is_scheduled_daily(
+    templates: dict[str, assertions.Template],
+) -> None:
+    control = templates["control"]
+    rules = control.find_resources("AWS::Events::Rule")
+    [rule] = [r for r in rules.values()
+              if r["Properties"]["Name"] == "aera-dev-reliability-refresh"]
+    assert rule["Properties"]["ScheduleExpression"] == "rate(1 day)"
+    functions = control.find_resources("AWS::Lambda::Function")
+    assert any(f["Properties"]["FunctionName"] == "aera-dev-reliability"
+               for f in functions.values())
+
+
 def lambda_env(template: assertions.Template) -> dict[str, dict[str, Any]]:
     return {
         f["Properties"]["FunctionName"]: f["Properties"].get("Environment", {}).get("Variables", {})

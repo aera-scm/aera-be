@@ -2,8 +2,7 @@
 
 One definition serves the AgentCore Gateway targets (each tool its own Lambda and read-only
 role) and local runs. Deliberately absent: any tool that writes to SAP, sends a message or
-changes configuration (confused-deputy defence). Tools of later milestones
-(get_supplier_reliability, request_replan) are not registered yet.
+changes configuration (confused-deputy defence). The later request_replan tool is absent.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from services.tools import calc, case_tools, sap_tools, simulate
+from services.tools import calc, case_tools, reliability, sap_tools, simulate
 from services.tools.context import ToolContext, ToolError
 
 
@@ -98,6 +97,13 @@ TOOLS: tuple[ToolSpec, ...] = (
         {"supplierId": S},
         ("supplierId",),
         sap_tools.sap_get_supplier,
+    ),
+    ToolSpec(
+        "get_supplier_reliability",
+        "SAP goods-receipt performance for supplier and material, with sample size and sourceRefs.",
+        {"supplierId": S, "material": S},
+        ("supplierId", "material"),
+        reliability.get_supplier_reliability,
     ),
     ToolSpec(
         "find_sources",

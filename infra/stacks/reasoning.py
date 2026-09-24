@@ -112,6 +112,8 @@ class ReasoningStack(Stack):
                 data.bus.grant_put_events_to(fn)
             if spec.name == "request_supplier_info":
                 tables["dialogue"].grant_read_write_data(fn)
+            if spec.name == "get_supplier_reliability":
+                tables["analytics"].grant_read_data(fn)
             fn.grant_invoke(gateway_role)
             agentcore.CfnGatewayTarget(
                 self,

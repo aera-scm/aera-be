@@ -27,6 +27,7 @@ from services.tools.context import (
     jsonable,
     parse_time,
 )
+from services.tools.reliability import profile_for
 from services.tools.sap_tools import (
     component_requirements,
     sap_get_purchase_order,
@@ -337,6 +338,18 @@ def compute_option(
         if rate is None:
             raise ToolError(f"no alternate-supplier rate for {supplier}")
         arrival = now + timedelta(hours=float(rate.lead_time_hours))
+        promised_arrival = arrival
+        profile = profile_for(ctx, supplier, case.material)
+        if profile is not None:
+            delay_days = int(profile["p90DelayDays"])
+            arrival += timedelta(days=delay_days)
+            source_ref = str(profile["sourceRefs"][0])
+            figures.extend([
+                {"name": "supplierP90DelayDays", "value": delay_days,
+                 "unit": "days", "sourceRef": source_ref},
+                {"name": "supplierSampleSize", "value": profile["sampleSize"],
+                 "unit": "schedule lines", "sourceRef": source_ref},
+            ])
         actions = [
             {
                 "type": "CREATE_PO_ALTERNATE",
@@ -344,7 +357,7 @@ def compute_option(
                 "material": case.material,
                 "plant": case.plant,
                 "qty": qty,
-                "deliveryDate": arrival.date(),
+                "deliveryDate": promised_arrival.date(),
             }
         ]
         coverage = qty

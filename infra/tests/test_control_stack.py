@@ -99,6 +99,28 @@ def test_fr_lrn_01_reliability_refresh_is_scheduled_daily(
                for f in functions.values())
 
 
+def test_fr_ver_04_reasoning_policy_guardrail_and_verifier_wiring(
+    templates: dict[str, assertions.Template],
+) -> None:
+    control = templates["control"]
+    policies = control.find_resources("AWS::Bedrock::AutomatedReasoningPolicy")
+    [policy] = policies.values()
+    rules = policy["Properties"]["PolicyDefinition"]["Rules"]
+    assert {rule["Id"] for rule in rules} == {
+        "BR05AUTO0001", "BR07DONOR001", "BR12RAR00001"
+    }
+    assert "total_cost_cents < rar_protected_cents" in rules[2]["Expression"]
+    guardrails = control.find_resources("AWS::Bedrock::Guardrail")
+    assert any("AutomatedReasoningPolicyConfig" in row["Properties"]
+               for row in guardrails.values())
+    params = control.find_resources("AWS::SSM::Parameter")
+    assert {row["Properties"]["Name"] for row in params.values()} >= {
+        "/aera/dev/REASONING_POLICY_ARN",
+        "/aera/dev/REASONING_GUARDRAIL_ID",
+        "/aera/dev/REASONING_GUARDRAIL_VERSION",
+    }
+
+
 def lambda_env(template: assertions.Template) -> dict[str, dict[str, Any]]:
     return {
         f["Properties"]["FunctionName"]: f["Properties"].get("Environment", {}).get("Variables", {})

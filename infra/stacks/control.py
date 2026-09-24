@@ -13,6 +13,7 @@ import json
 from typing import Any
 
 from aws_cdk import Duration, Stack
+from aws_cdk import aws_bedrock as bedrock
 from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
@@ -20,6 +21,7 @@ from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_lambda_event_sources as sources
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_sqs as sqs
+from aws_cdk import aws_ssm as ssm
 from aws_cdk import aws_stepfunctions as sfn
 from constructs import Construct
 
@@ -27,6 +29,7 @@ from infra.constructs.execution_workflow import definition
 from infra.constructs.service_function import ServiceFunction
 from infra.environments import require_deployable_environment
 from infra.stacks.data import DataStack
+from infra.stacks.reasoning_policy import add_reasoning_policy
 
 MIRROR_SECRET = "sap/mirror-oauth-client"  # pragma: allowlist secret (a name, not a value)
 
@@ -49,6 +52,32 @@ class ControlStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
         require_deployable_environment(env_name)
         tables = data.tables
+        policy_arn = add_reasoning_policy(self, env_name)
+        reasoning_guardrail = bedrock.CfnGuardrail(
+            self, "ReasoningGuardrail",
+            name=f"aera-{env_name}-approval-reasoning",
+            description="English approval policy findings (FR-VER-04)",
+            blocked_input_messaging="Automated Reasoning policy flagged the input.",
+            blocked_outputs_messaging="Automated Reasoning policy flagged the output.",
+            automated_reasoning_policy_config=(
+                bedrock.CfnGuardrail.AutomatedReasoningPolicyConfigProperty(
+                    policies=[policy_arn], confidence_threshold=0.8,
+                )
+            ),
+            kms_key_arn=data.key.key_arn,
+        )
+        reasoning_version = bedrock.CfnGuardrailVersion(
+            self, "ReasoningGuardrailVersion",
+            guardrail_identifier=reasoning_guardrail.attr_guardrail_id,
+        )
+        for key, value in (
+            ("REASONING_GUARDRAIL_ID", reasoning_guardrail.attr_guardrail_id),
+            ("REASONING_GUARDRAIL_VERSION", reasoning_version.attr_version),
+        ):
+            ssm.StringParameter(
+                self, f"Param{key}", parameter_name=f"/aera/{env_name}/{key}",
+                string_value=value,
+            )
 
         scheduler_role = iam.Role(
             self,
@@ -296,7 +325,11 @@ class ControlStack(Stack):
                 "AERA_SCHEDULER_ROLE_ARN": scheduler_role.role_arn,
             },
             secrets=(MIRROR_SECRET,),
-            parameters=("SAP_READ_BASE", "GUARDRAIL_ID", "GUARDRAIL_VERSION"),
+            parameters=(
+                "SAP_READ_BASE", "GUARDRAIL_ID", "GUARDRAIL_VERSION",
+                "REASONING_GUARDRAIL_ID", "REASONING_GUARDRAIL_VERSION",
+                "REASONING_POLICY_ARN",
+            ),
             timeout=Duration.seconds(60),
             memory_mb=1024,
         ).function
@@ -309,7 +342,10 @@ class ControlStack(Stack):
         verifier.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock:ApplyGuardrail"],
-                resources=[self.format_arn(service="bedrock", resource="guardrail/*")],
+                resources=[
+                    self.format_arn(service="bedrock", resource="guardrail/*"),
+                    reasoning_guardrail.attr_guardrail_arn,
+                ],
             )
         )
         verifier.add_to_role_policy(

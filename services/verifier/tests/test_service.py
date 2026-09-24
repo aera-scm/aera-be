@@ -28,6 +28,7 @@ from services.tools.tests.test_tools import (  # noqa: F401 - pytest fixtures
     photo,
     reference_options,
 )
+from services.verifier.automated_reasoning import PolicyAssessment
 from services.verifier.logic import Grounding
 from services.verifier.service import VerifierService
 
@@ -139,6 +140,28 @@ def test_fr_rte_01_sto_only_plan_of_usd_4100_is_tier_1(
     assert outbox(ctx) == ["PlanApproved", "PlanRouted"]
     case = ctx.cases.get(CASE)
     assert case is not None and case.status is CaseStatus.AUTO_APPROVED
+
+
+def test_at_24_policy_disagreement_escalates_before_any_execution(
+    ctx: ToolContext,  # noqa: F811
+    photo: Signal,  # noqa: F811
+    verifier: VerifierService,
+) -> None:
+    propose(ctx, photo, ["C"])
+    verifier.reasoning = lambda verified, proposed, policy: PolicyAssessment(
+        "INVALID", "Synthetic policy facts", ("INVALID",), "policy-arn"
+    )
+
+    result = verifier.handle(CASE, 1)
+
+    assert result["tier"] == 3
+    assert result["reason"] == "AUTOMATED_REASONING_DISAGREEMENT"
+    assert outbox(ctx) == ["PlanRouted"]
+    case = ctx.cases.get(CASE)
+    assert case is not None and case.status is CaseStatus.ESCALATED
+    plan = ControlStore(ctx.dynamodb, ENV).get(CASE, "PLAN#1") or {}
+    assert plan["automatedReasoning"]["status"] == "INVALID"
+    assert plan["automatedReasoning"]["policyArn"] == "policy-arn"
 
 
 def test_fr_ver_02_choosing_the_non_compliant_supplier_escalates(

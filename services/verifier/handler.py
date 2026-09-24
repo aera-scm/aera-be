@@ -16,6 +16,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     global _service
     if _service is None:
         from services.shared import runtime
+        from services.verifier.automated_reasoning import assess
         from services.verifier.grounding import evaluate
 
         bedrock = runtime.client("bedrock-runtime")
@@ -35,6 +36,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             sap=runtime.sap_client(),
             bus=runtime.client("events"),
             grounding=grounding,
+            reasoning=lambda verified, proposed, policy: assess(
+                bedrock,
+                runtime.parameter("REASONING_GUARDRAIL_ID"),
+                runtime.parameter("REASONING_GUARDRAIL_VERSION"),
+                runtime.parameter("REASONING_POLICY_ARN"),
+                verified, proposed, policy,
+            ),
             scheduler=runtime.client("scheduler"),
             timer_target_arn=os.environ.get("AERA_APPROVAL_TIMER_ARN", ""),
             scheduler_role_arn=os.environ.get("AERA_SCHEDULER_ROLE_ARN", ""),

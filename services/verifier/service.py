@@ -29,12 +29,14 @@ from services.shared.models import CaseStatus, PlanRecord
 from services.shared.runtime import emit
 from services.shared.sap_client import SapClient
 from services.tools.context import ToolContext
+from services.verifier.automated_reasoning import PolicyAssessment
 from services.verifier.evidence import EvidenceReader
 from services.verifier.logic import Grounding, Verification, verify
 
 COMPONENT = "verifier"
 # (rationale, source, query) -> scores; the Lambda passes the Guardrail call (FR-VER-03).
 GroundingCheck = Callable[[str, str, str], Grounding]
+ReasoningCheck = Callable[[Verification, Route, Policy], PolicyAssessment]
 NEXT_STATUS = {
     1: CaseStatus.AUTO_APPROVED,
     2: CaseStatus.AWAITING_APPROVAL,
@@ -48,6 +50,7 @@ class VerifierService:
     sap: SapClient
     bus: Any
     grounding: GroundingCheck
+    reasoning: ReasoningCheck | None = None
     scheduler: Any = None
     timer_target_arn: str = ""
     scheduler_role_arn: str = ""
@@ -136,14 +139,30 @@ class VerifierService:
             },
         )
         now = self.clock()
+        policy = self.policy()
         result = route(
             verification,
             now=now,
             stockout=facts.stockout,
             plant=case.plant,
             limits=self.control.limits(),
-            policy=self.policy(),
+            policy=policy,
         )
+        if self.reasoning is not None:
+            assessment = self.reasoning(verification, result, policy)
+            self.dynamodb.update_item(
+                TableName=self._table,
+                Key=to_item({"PK": f"CASE#{case_id}", "SK": f"PLAN#{plan_version}"}),
+                UpdateExpression="SET automatedReasoning = :assessment",
+                ExpressionAttributeValues=to_item({":assessment": {
+                    "status": assessment.status,
+                    "statements": assessment.statements,
+                    "findings": assessment.findings,
+                    "policyArn": assessment.policy_arn,
+                }}),
+            )
+            if result.tier != 3 and assessment.disagrees:
+                result = Route(3, result.version_hash, reason="AUTOMATED_REASONING_DISAGREEMENT")
         self.control.save(verification, result, plant=case.plant, now=now)
         self._settle(case_id, result)
         return {

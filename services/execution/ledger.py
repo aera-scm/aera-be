@@ -23,6 +23,11 @@ class Ledger:
         ).get("Item")
         return from_item(item) if item else None
 
+    def allocated(self, *, material: str, plant: str) -> Decimal:
+        """Units already held at a plant; the Verifier's dry run (V-08) subtracts them."""
+        balance = self._read(f"MAT#{material}#PLANT#{plant}", "BAL")
+        return Decimal(str(balance["allocated"])) if balance else Decimal(0)
+
     def reserve(
         self,
         *,

@@ -26,6 +26,7 @@ from typing import Any
 
 from services.api.admin import Admin, AdminError
 from services.api.chat import Chat
+from services.routing.store import ApprovalConflict, ControlStore
 from services.rules.br_13 import board_key, rank_reason
 from services.run_starter.handler import STARTABLE
 from services.shared import http
@@ -66,6 +67,7 @@ class Problem(Exception):
 class User:
     id: str
     groups: frozenset[str]
+    email: str = ""  # DR-12 names approvers by e-mail address
 
 
 def _user(event: dict[str, Any]) -> User:
@@ -75,7 +77,11 @@ def _user(event: dict[str, Any]) -> User:
         raise Problem(401, "Not signed in")
     raw = claims.get("cognito:groups") or ""
     groups = raw if isinstance(raw, list) else re.findall(r"[a-z]+", str(raw))
-    return User(id=str(subject), groups=frozenset(str(g) for g in groups))
+    return User(
+        id=str(subject),
+        groups=frozenset(str(g) for g in groups),
+        email=str(claims.get("email") or "").strip().lower(),
+    )
 
 
 def _require(user: User, allowed: frozenset[str]) -> None:
@@ -176,6 +182,9 @@ class Api:
         if resource == "/cases/{id}/rollback":
             _require(user, APPROVERS)
             return self.rollback(params["id"], user)
+        if resource == "/cases/{id}/approval":
+            _require(user, APPROVERS)
+            return self.approve(params["id"], _json_body(event), user)
         if resource in ("/admin/killswitch", "/admin/reset"):
             _require(user, ADMINS)
             body = _json_body(event)
@@ -205,6 +214,53 @@ class Api:
             return http.response(200, action(self.admin))
         except AdminError as error:
             raise Problem(400, "Refused", str(error)) from None
+
+    def approve(self, case_id: str, body: dict[str, Any], user: User) -> dict[str, Any]:
+        """FR-RTE-03/04, AT-16: the decision binds to the plan version hash; a stale or
+        repeated decision is refused with the current plan so the approver can refresh."""
+        case = self._case(case_id)
+        decision = str(body.get("decision") or "").upper()
+        comment = body.get("comment") or ""
+        version_hash = body.get("planVersionHash")
+        if not isinstance(version_hash, str) or not isinstance(comment, str):
+            raise Problem(400, "planVersionHash and comment must be strings")
+        control = ControlStore(self.dynamodb, self.env)
+        try:
+            part = control.decide(
+                case_id,
+                actor=user.email or user.id,
+                groups=user.groups,
+                version_hash=version_hash,
+                decision=decision,
+                comment=comment,
+                now=self.clock(),
+            )
+        except PermissionError as error:
+            raise Problem(403, "Not allowed to decide", str(error)) from None
+        except ApprovalConflict as error:
+            current = control.get(case_id, f"ROUTE#{case.plan_version}")
+            return http.response(
+                409,
+                {
+                    "title": "Decision refused",
+                    "detail": str(error),
+                    "currentPlanVersion": case.plan_version,
+                    "currentPlanVersionHash": current["versionHash"] if current else None,
+                },
+            )
+        except ValueError as error:
+            raise Problem(400, "Invalid decision", str(error)) from None
+        if decision == "REJECTED" and case.status is CaseStatus.AWAITING_APPROVAL:
+            self.cases.transition(
+                case_id,
+                CaseStatus.REJECTED,
+                actor=f"user:{user.id}",
+                reason=comment,
+                expected=CaseStatus.AWAITING_APPROVAL,
+            )
+        return http.response(
+            200, {"decision": part["decision"], "planPartId": part["id"], "caseId": case_id}
+        )
 
     def rollback(self, case_id: str, user: User) -> dict[str, Any]:
         """FR-EXE-08, FR-MON-03: an approver rolls back a reopened case's executed plan. The

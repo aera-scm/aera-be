@@ -148,3 +148,23 @@ def test_notifier_and_monitor_listen_on_the_bus(
     }
     assert rules["aera-dev-notifier"] == ["NotificationRequested"]
     assert rules["aera-dev-monitor"] == ["GoodsReceiptDue"]
+
+
+def test_srd_6_6_verifier_runs_on_plan_proposed_and_cannot_write_to_sap(
+    templates: dict[str, assertions.Template],
+) -> None:
+    control = templates["control"]
+    rules = {
+        r["Properties"]["Name"]: r["Properties"]["EventPattern"]["detail-type"]
+        for r in control.find_resources("AWS::Events::Rule").values()
+    }
+    assert rules["aera-dev-verifier"] == ["PlanProposed"]
+    env = lambda_env(control)["aera-dev-verifier"]
+    assert "AERA_SAP_WRITES" not in env and "AERA_APPROVAL_TIMER_ARN" in env
+    policies = [
+        json.dumps(p)
+        for p in control.find_resources("AWS::IAM::Policy").values()
+        if "verifier" in json.dumps(p["Properties"]["Roles"]).lower()
+    ]
+    assert policies and not any("SAP_WRITE_BASE" in p or "ses:Send" in p for p in policies)
+    assert any("bedrock:ApplyGuardrail" in p for p in policies)

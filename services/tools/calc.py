@@ -17,6 +17,7 @@ from typing import Any
 from services.rules.br_02 import usable
 from services.shared.dynamo import table_name, to_item
 from services.shared.models import ExtractedField, FieldStatus
+from services.shared.ratecard import Rate
 from services.shared.triage import assess
 from services.tools.context import (
     ToolContext,
@@ -98,6 +99,21 @@ def calc_impact(
     recovery_at: str | None = None,
     recovery_source_ref: str | None = None,
 ) -> dict[str, Any]:
+    result = compute_impact(ctx, case_id, recovery_at, recovery_source_ref)
+    ctx.dynamodb.put_item(
+        TableName=table_name("cases", ctx.env),
+        Item=to_item({"PK": f"CASE#{case_id}", "SK": "IMPACT", **jsonable(result)}),
+    )
+    return json_dict(result)
+
+
+def compute_impact(
+    ctx: ToolContext,
+    case_id: str,
+    recovery_at: str | None = None,
+    recovery_source_ref: str | None = None,
+) -> dict[str, Any]:
+    """The impact from fresh SAP reads, without recording it (the Verifier re-derives it)."""
     case = _case(ctx, case_id)
     now = ctx.now()
     recovery = parse_time(recovery_at) if recovery_at else None
@@ -165,11 +181,7 @@ def calc_impact(
         "discrepancies": _discrepancies(ctx, case),
         "figures": figures,
     }
-    ctx.dynamodb.put_item(
-        TableName=table_name("cases", ctx.env),
-        Item=to_item({"PK": f"CASE#{case_id}", "SK": "IMPACT", **jsonable(result)}),
-    )
-    return json_dict(result)
+    return result
 
 
 def _usable_quantity(ctx: ToolContext, case_id: str, field_id: str) -> tuple[Decimal, str]:
@@ -196,7 +208,7 @@ def _plain(value: Any) -> str:
     return format(Decimal(str(value)).normalize(), "f")
 
 
-def _draft_key(cost: Any, coverage: Any, cost_ref: str) -> str:
+def draft_key(cost: Any, coverage: Any, cost_ref: str) -> str:
     canonical = json.dumps(
         {"cost": _plain(cost), "coverage": _plain(coverage), "ref": cost_ref}, sort_keys=True
     )
@@ -206,6 +218,28 @@ def _draft_key(cost: Any, coverage: Any, cost_ref: str) -> str:
 def calc_option(
     ctx: ToolContext, case_id: str, action_type: str, params: dict[str, Any]
 ) -> dict[str, Any]:
+    draft, _ = compute_option(ctx, case_id, action_type, params)
+    ctx.dynamodb.put_item(
+        TableName=table_name("cases", ctx.env),
+        Item=to_item(
+            {
+                "PK": f"CASE#{case_id}",
+                "SK": "DRAFT#"
+                + draft_key(draft["costUsd"], draft["coverageUnits"], draft["costSourceRef"]),
+                **jsonable(draft),
+                # What the Verifier needs to recalculate the option independently.
+                "params": jsonable(params),
+                "createdAt": ctx.now().isoformat(),
+            }
+        ),
+    )
+    return json_dict(draft)
+
+
+def compute_option(
+    ctx: ToolContext, case_id: str, action_type: str, params: dict[str, Any]
+) -> tuple[dict[str, Any], Rate]:
+    """One priced option from fresh SAP and rate-card reads, without recording it."""
     case = _case(ctx, case_id)
     now = ctx.now()
     if action_type not in ACTION_TYPES:
@@ -326,18 +360,7 @@ def calc_option(
         "actions": actions,
         "figures": figures,
     }
-    ctx.dynamodb.put_item(
-        TableName=table_name("cases", ctx.env),
-        Item=to_item(
-            {
-                "PK": f"CASE#{case_id}",
-                "SK": f"DRAFT#{_draft_key(cost, coverage, rate.source_ref)}",
-                **jsonable(draft),
-                "createdAt": now.isoformat(),
-            }
-        ),
-    )
-    return json_dict(draft)
+    return draft, rate
 
 
 def draft_exists(ctx: ToolContext, case_id: str, cost: Any, coverage: Any, cost_ref: str) -> bool:
@@ -345,7 +368,7 @@ def draft_exists(ctx: ToolContext, case_id: str, cost: Any, coverage: Any, cost_
         TableName=table_name("cases", ctx.env),
         Key={
             "PK": {"S": f"CASE#{case_id}"},
-            "SK": {"S": f"DRAFT#{_draft_key(cost, coverage, cost_ref)}"},
+            "SK": {"S": f"DRAFT#{draft_key(cost, coverage, cost_ref)}"},
         },
     ).get("Item")
     return item is not None

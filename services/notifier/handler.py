@@ -49,6 +49,11 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "Recovery for {material} at plant {plant} is executed. SAP documents: {documents}. "
         "Projected stock-out before action: {stockout}.",
     ),
+    "APPROVAL_REQUEST": (
+        "{case}: plan waits for your approval",
+        "A verified plan for {case} ({material}, plant {plant}) is routed to you for "
+        "approval. Open the AERA console to review it before its deadline.",
+    ),
     "APPROVAL_REMINDER": (
         "{case}: approval needed",
         "A plan for {case} ({material}, plant {plant}) waits for your decision. "
@@ -59,7 +64,7 @@ ROLE_TEMPLATES = {
     "supplier": {"SUPPLIER_PLAN_CONFIRMATION"},
     "customer_service": {"CUSTOMER_SERVICE_UPDATE"},
     "production_planning": {"PRODUCTION_PLANNING_UPDATE"},
-    "approver": {"APPROVAL_REMINDER"},
+    "approver": {"APPROVAL_REQUEST", "APPROVAL_REMINDER"},
 }
 
 

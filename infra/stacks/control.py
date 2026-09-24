@@ -224,5 +224,66 @@ class ControlStack(Stack):
                     targets.LambdaFunction(fn, retry_attempts=8, dead_letter_queue=dead_letters)
                 ],
             )
+        # Verifier and routing (SRD 6.6, 6.7): PlanProposed in; routes with its outbox out.
+        routing = ServiceFunction(
+            self, "routing", env_name=env_name, component="routing", code=code, parameters=()
+        ).function
+        for name in ("cases", "audit"):
+            tables[name].grant_read_write_data(routing)
+        tables["config"].grant_read_data(routing)
+        data.key.grant_encrypt_decrypt(routing)
+        routing.grant_invoke(scheduler_role)
+        verifier = ServiceFunction(
+            self,
+            "verifier",
+            env_name=env_name,
+            component="verifier",
+            code=code,
+            environment={
+                "AERA_APPROVAL_TIMER_ARN": routing.function_arn,
+                "AERA_SCHEDULER_ROLE_ARN": scheduler_role.role_arn,
+            },
+            secrets=(MIRROR_SECRET,),
+            parameters=("SAP_READ_BASE", "GUARDRAIL_ID", "GUARDRAIL_VERSION"),
+            timeout=Duration.seconds(60),
+            memory_mb=1024,
+        ).function
+        for name in ("cases", "audit"):
+            tables[name].grant_read_write_data(verifier)
+        for name in ("signals", "config", "ledger"):
+            tables[name].grant_read_data(verifier)
+        data.bus.grant_put_events_to(verifier)
+        data.key.grant_encrypt_decrypt(verifier)
+        verifier.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:ApplyGuardrail"],
+                resources=[self.format_arn(service="bedrock", resource="guardrail/*")],
+            )
+        )
+        verifier.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["scheduler:CreateSchedule"],
+                resources=[
+                    self.format_arn(
+                        service="scheduler",
+                        resource="schedule",
+                        resource_name=f"default/aera-{env_name}-appr-*",
+                    )
+                ],
+            )
+        )
+        scheduler_role.grant_pass_role(verifier.grant_principal)
+        events.Rule(
+            self,
+            "OnPlanProposed",
+            rule_name=f"aera-{env_name}-verifier",
+            event_bus=data.bus,
+            event_pattern=events.EventPattern(
+                source=events.Match.prefix("aera."), detail_type=["PlanProposed"]
+            ),
+            targets=[
+                targets.LambdaFunction(verifier, retry_attempts=4, dead_letter_queue=dead_letters)
+            ],
+        )
         self.state_machine = machine
         self.execution_function = execution

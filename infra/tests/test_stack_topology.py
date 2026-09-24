@@ -46,12 +46,12 @@ def test_nfr_mnt_02_all_stacks_and_dependencies() -> None:
             "owner": "synthetic-owner",
         }
         template = assertions.Template.from_stack(stack)
-        # M1-M3 build Lambdas in gate, edge, reasoning and control; later resources wait.
+        # Runtimes live in reasoning and interop; Lambdas stay in their service stacks.
         if name not in {"gate", "edge", "reasoning", "control"}:
             template.resource_count_is("AWS::Lambda::Function", 0)
         if name != "edge":
             template.resource_count_is("AWS::ApiGateway::RestApi", 0)
-        if name != "reasoning":
+        if name not in {"reasoning", "interop"}:
             template.resource_count_is("AWS::BedrockAgentCore::Runtime", 0)
         if name != "control":
             template.resource_count_is("AWS::StepFunctions::StateMachine", 0)
@@ -70,9 +70,10 @@ def test_nfr_mnt_02_all_stacks_and_dependencies() -> None:
             "web",
             "gate",
             "edge",
-            "reasoning",
-            "control",
-        }:
+                "reasoning",
+                "control",
+                "interop",
+            }:
             resources = list(artifact.template["Resources"].values())
             assert len(resources) == 1
             assert resources[0]["Type"] == "AWS::CloudFormation::WaitConditionHandle"

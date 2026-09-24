@@ -44,6 +44,7 @@ class DataSettings:
     console_origins: tuple[str, ...] = ()
     inbound_recipients: tuple[str, ...] = ()
     whatsapp_media: str = "graph"
+    agent_card_url: str | None = None
 
 
 def _optional(environ: Mapping[str, str], name: str) -> str | None:
@@ -73,6 +74,7 @@ def data_settings_from_environment(environ: Mapping[str, str]) -> DataSettings:
         console_origins=_list(environ, "AERA_CONSOLE_ORIGINS"),
         inbound_recipients=_list(environ, "AERA_INBOUND_RECIPIENTS"),
         whatsapp_media=_optional(environ, "AERA_WHATSAPP_MEDIA") or "graph",
+        agent_card_url=_optional(environ, "AERA_AGENT_CARD_URL"),
     )
 
 
@@ -157,8 +159,19 @@ def build_app(settings: DataSettings) -> App:
         code=service_code(settings.lambda_bundle),
         **common,
     )
+    edge = stacks["edge"]
+    assert isinstance(edge, EdgeStack)
+    stacks["interop"] = InteropStack(
+        app,
+        f"aera-{env_name}-interop",
+        api_function=edge.functions["api"],
+        discovery_url=identity.interop_discovery_url,
+        client_id=identity.interop_client_id,
+        oauth_scope=identity.interop_scope,
+        agent_card_url=settings.agent_card_url,
+        **common,
+    )
     for component, stack_type in (
-        ("interop", InteropStack),
         ("web", WebStack),
         ("observability", ObservabilityStack),
     ):

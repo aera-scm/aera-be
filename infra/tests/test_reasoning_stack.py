@@ -87,7 +87,11 @@ def test_srd_6_18_container_lifecycle_and_asset_allowlist(
         "MaxLifetime": 3600,
     }
     assets = json.loads((directory / "aera-dev-reasoning.assets.json").read_text())
-    [image] = assets["dockerImages"].values()
+    [image] = [
+        asset
+        for asset in assets["dockerImages"].values()
+        if asset["source"]["dockerFile"] == "services/agent/Dockerfile"
+    ]
     assert image["source"]["platform"] == "linux/arm64"
     root = directory / image["source"]["directory"]
     names = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}

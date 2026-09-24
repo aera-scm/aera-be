@@ -59,6 +59,41 @@ class IdentityStack(Stack):
             enable_token_revocation=True,
             explicit_auth_flows=["ALLOW_REFRESH_TOKEN_AUTH"],
         )
+        resource_server = cognito.CfnUserPoolResourceServer(
+            self,
+            "InteropScopes",
+            user_pool_id=pool.ref,
+            identifier=f"aera-{env_name}-interop",
+            name="AERA external agent service",
+            scopes=[
+                cognito.CfnUserPoolResourceServer.ResourceServerScopeTypeProperty(
+                    scope_name="invoke", scope_description="Submit signals and read case results"
+                )
+            ],
+        )
+        self.interop_scope = f"aera-{env_name}-interop/invoke"
+        machine_client = cognito.CfnUserPoolClient(
+            self,
+            "InteropClient",
+            user_pool_id=pool.ref,
+            client_name=f"aera-{env_name}-interop",
+            generate_secret=True,
+            allowed_o_auth_flows=["client_credentials"],
+            allowed_o_auth_flows_user_pool_client=True,
+            allowed_o_auth_scopes=[self.interop_scope],
+            prevent_user_existence_errors="ENABLED",
+            enable_token_revocation=True,
+        )
+        machine_client.add_dependency(resource_server)
+        self.interop_client_id = machine_client.ref
+        self.interop_discovery_url = Fn.join(
+            "",
+            [
+                f"https://cognito-idp.{self.region}.amazonaws.com/",
+                pool.ref,
+                "/.well-known/openid-configuration",
+            ],
+        )
         cognito.CfnUserPoolDomain(
             self,
             "HostedDomain",
@@ -75,3 +110,4 @@ class IdentityStack(Stack):
         )
         CfnOutput(self, "UserPoolId", value=pool.ref)
         CfnOutput(self, "ClientId", value=client.ref)
+        CfnOutput(self, "InteropClientId", value=machine_client.ref)

@@ -109,6 +109,11 @@ def _case_json(case: Case) -> dict[str, Any]:
     return case.model_dump(mode="json", by_alias=True)
 
 
+def _interop_summary(case: Case) -> dict[str, Any]:
+    value = _case_json(case)
+    return {key: value[key] for key in ("caseId", "type", "status", "stage", "updatedAt")}
+
+
 @dataclass
 class Api:
     dynamodb: Any
@@ -205,12 +210,44 @@ class Api:
             )
             return http.response(202, {"signalId": signal.signal_id, "status": "SUBMITTED_TO_GATE"})
         if operation == "list_cases":
-            return http.response(200, self.board(None, None))
+            return http.response(
+                200,
+                [_interop_summary(self._case(row["caseId"])) for row in self.board(None, None)],
+            )
+        if operation == "get_signal_status":
+            signal_id = payload.get("signalId")
+            if not isinstance(signal_id, str) or not re.fullmatch(
+                r"[0-9A-HJKMNP-TV-Z]{26}", signal_id
+            ):
+                raise Problem(400, "signalId is required")
+            stored_signal = self.signals.get(signal_id)
+            if stored_signal is None or stored_signal.sender_id != f"agent:{client_id}":
+                raise Problem(404, "Signal not found")
+            case = self.cases.get(stored_signal.case_id) if stored_signal.case_id else None
+            state = "submitted"
+            if stored_signal.status is SignalStatus.QUARANTINED:
+                state = "rejected"
+            elif case and case.status is CaseStatus.CLOSED:
+                state = "completed"
+            elif case and case.status in TERMINAL:
+                state = "failed"
+            elif stored_signal.status is SignalStatus.ACCEPTED:
+                state = "working"
+            return http.response(
+                200,
+                {
+                    "kind": "task",
+                    "id": signal_id,
+                    "contextId": signal_id,
+                    "status": {"state": state},
+                    "metadata": {"caseId": stored_signal.case_id},
+                },
+            )
         case_id = payload.get("caseId")
         if not isinstance(case_id, str):
             raise Problem(400, "caseId is required")
         if operation == "get_case_status":
-            return http.response(200, self.case_detail(case_id))
+            return http.response(200, _interop_summary(self._case(case_id)))
         try:
             return http.response(
                 200, collect(self.dynamodb, self._case(case_id).case_id, self.env or "dev")

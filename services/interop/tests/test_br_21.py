@@ -60,6 +60,12 @@ def test_br_21_at_26_agent_signal_passes_gate_but_approval_is_refused(
         signal and signal.channel.value == "AGENT" and signal.sender_id == "agent:external-agent-1"
     )
     assert signal.sender_verified is False and signal.supplier_id is None
+    own_status = api.handle(event("get_signal_status", {"signalId": signal_id}))
+    other_status = api.handle(
+        event("get_signal_status", {"signalId": signal_id}, "external-agent-2")
+    )
+    assert json.loads(own_status["body"])["status"]["state"] == "submitted"
+    assert other_status["statusCode"] == 404
     gate = Gatekeeper(
         signals=SignalStore(dynamodb, "test"),
         raw=raw,

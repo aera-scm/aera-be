@@ -9,7 +9,13 @@ from typing import Any
 from services.shared.dynamo import table_name
 
 ALLOWED = frozenset(
-    {"submit_exception_signal", "list_cases", "get_case_status", "get_decision_record"}
+    {
+        "submit_exception_signal",
+        "get_signal_status",
+        "list_cases",
+        "get_case_status",
+        "get_decision_record",
+    }
 )
 CLIENT_ID = re.compile(r"^[A-Za-z0-9._:-]{1,100}$")
 RATE_PER_MINUTE = 30

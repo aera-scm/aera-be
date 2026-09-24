@@ -12,13 +12,14 @@ from typing import Any
 from aws_cdk import Duration, RemovalPolicy, Stack
 from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_events as events
+from aws_cdk import aws_iam as iam
 from aws_cdk import aws_kms as kms
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_ssm as ssm
 from constructs import Construct
 
-from infra.config_defaults import SSM_PARAMETER_KEYS
+from infra.config_defaults import GATE_PARAMETER_KEYS, SSM_PARAMETER_KEYS
 
 # Explicit marker for a deployment value that does not exist yet. Never a
 # plausible id or endpoint, so a service reading it fails instead of guessing.
@@ -117,7 +118,39 @@ class DataStack(Stack):
         }
         self.bus = events.EventBus(self, "Bus", event_bus_name=f"aera-{env_name}")
 
-        values = {key: UNSET for key in SSM_PARAMETER_KEYS}
+        # SES receipt rule (edge stack) writes supplier mail under ses/; objects created in the
+        # raw bucket are announced on the default bus, which triggers ses-inbound (IR-06).
+        raw = self.buckets["raw"]
+        # The CloudFormation property, not the L2 flag: the flag adds a custom-resource Lambda
+        # and this stack holds no compute.
+        raw_cfn = raw.node.default_child
+        assert isinstance(raw_cfn, s3.CfnBucket)
+        raw_cfn.notification_configuration = s3.CfnBucket.NotificationConfigurationProperty(
+            event_bridge_configuration=s3.CfnBucket.EventBridgeConfigurationProperty(
+                event_bridge_enabled=True
+            )
+        )
+        ses = iam.ServicePrincipal("ses.amazonaws.com")
+        from_this_account = {"StringEquals": {"aws:SourceAccount": self.account}}
+        raw.add_to_resource_policy(
+            iam.PolicyStatement(
+                principals=[ses],
+                actions=["s3:PutObject"],
+                resources=[raw.arn_for_objects("ses/*")],
+                conditions=from_this_account,
+            )
+        )
+        self.key.add_to_resource_policy(
+            iam.PolicyStatement(
+                principals=[ses],
+                actions=["kms:GenerateDataKey*", "kms:Encrypt"],
+                resources=["*"],
+                conditions=from_this_account,
+            )
+        )
+
+        # Guardrail id and version come from the gate stack, which creates the Guardrail.
+        values = {key: UNSET for key in SSM_PARAMETER_KEYS if key not in GATE_PARAMETER_KEYS}
         values["SAP_SANDBOX_BASE"] = SAP_SANDBOX_BASE_URL
         values.update(model_ids or {})
         for key, value in values.items():
@@ -130,9 +163,11 @@ class DataStack(Stack):
             )
 
         existing = existing_secrets or {}
-        for component, description in (
-            ("sandbox-api-key", "SAP Business Accelerator Hub sandbox API key (IR-01)"),
-            ("mirror-oauth-client", "SAP Mirror OAuth client credentials (IR-02)"),
+        for path, component, description in (
+            ("sap", "sandbox-api-key", "SAP Business Accelerator Hub sandbox API key (IR-01)"),
+            ("sap", "mirror-oauth-client", "SAP Mirror OAuth client credentials (IR-02)"),
+            ("channels", "whatsapp", "WhatsApp app secret, verify and access token (IR-07)"),
+            ("channels", "carrier-webhook", "Carrier webhook HMAC keys by carrier id (IR-08)"),
         ):
             if component in existing:
                 continue
@@ -140,7 +175,7 @@ class DataStack(Stack):
             secret = secretsmanager.CfnSecret(
                 self,
                 f"Secret-{component}",
-                name=f"/aera/{env_name}/sap/{component}",
+                name=f"/aera/{env_name}/{path}/{component}",
                 description=f"{description}; value placed at runtime, never in code",
                 kms_key_id=self.key.key_arn,
             )

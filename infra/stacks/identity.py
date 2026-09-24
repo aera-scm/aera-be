@@ -40,6 +40,7 @@ class IdentityStack(Stack):
             ),
         )
         pool.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.pool_arn = pool.attr_arn
         for group in ("planner", "approver", "admin"):
             cognito.CfnUserPoolGroup(self, group, group_name=group, user_pool_id=pool.ref)
         client = cognito.CfnUserPoolClient(

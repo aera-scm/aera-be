@@ -8,6 +8,7 @@ CloudFormation or ``cdk bootstrap`` without a verified budget.
 import subprocess
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -101,7 +102,8 @@ class Recorder:
             raise subprocess.CalledProcessError(3, list(command))
 
 
-OWNER = {"AERA_OWNER_TAG": "aera-test-owner"}
+BUNDLE = str(Path(__file__).parent / "fixtures" / "lambda-bundle")
+OWNER = {"AERA_OWNER_TAG": "aera-test-owner", "AERA_LAMBDA_BUNDLE": BUNDLE}
 
 
 def run_action(action: str, recorder: Recorder, *, verified: bool = True, env: str = "dev") -> Any:
@@ -331,6 +333,7 @@ def test_cli_missing_budget_blocks_bootstrap_through_real_verification(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("AERA_OWNER_TAG", "aera-test-owner")
+    monkeypatch.setenv("AERA_LAMBDA_BUNDLE", BUNDLE)
     sts, budgets = sts_client(), budgets_client()
     with Stubber(sts) as sts_stub, Stubber(budgets) as budgets_stub:
         stub_caller_identity(sts_stub)
@@ -348,6 +351,7 @@ def test_cli_missing_budget_blocks_bootstrap_through_real_verification(
 
 def test_cli_verified_budget_allows_bootstrap_and_deploy(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AERA_OWNER_TAG", "aera-test-owner")
+    monkeypatch.setenv("AERA_LAMBDA_BUNDLE", BUNDLE)
     recorder = Recorder()
     sts, budgets = sts_client(), budgets_client()
     with Stubber(sts) as sts_stub, Stubber(budgets) as budgets_stub:
@@ -367,6 +371,7 @@ def test_cli_verified_budget_allows_bootstrap_and_deploy(monkeypatch: pytest.Mon
 
 def test_cli_returns_failing_command_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AERA_OWNER_TAG", "aera-test-owner")
+    monkeypatch.setenv("AERA_LAMBDA_BUNDLE", BUNDLE)
     recorder = Recorder(fail_on="bootstrap")
     sts, budgets = sts_client(), budgets_client()
     with Stubber(sts) as sts_stub, Stubber(budgets) as budgets_stub:
@@ -381,3 +386,23 @@ def test_cli_returns_failing_command_exit_code(monkeypatch: pytest.MonkeyPatch) 
 
     assert code == 3
     assert recorder.events == ["bootstrap"]
+
+
+@pytest.mark.parametrize("bundle", [None, "", "does/not/exist"])
+def test_deploy_refuses_without_a_built_lambda_bundle(bundle: str | None) -> None:
+    recorder = Recorder()
+    environ = {"AERA_OWNER_TAG": "aera-test-owner"}
+    if bundle is not None:
+        environ["AERA_LAMBDA_BUNDLE"] = bundle
+
+    with pytest.raises(DeploymentRefusedError, match="bundle|build_lambda"):
+        run(
+            "deploy",
+            env_name="dev",
+            profile="aera-test",
+            region="us-east-1",
+            verify=recorder.verify_ok,
+            runner=recorder.runner,
+            environ=environ,
+        )
+    assert recorder.events == []

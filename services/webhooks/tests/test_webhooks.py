@@ -229,3 +229,16 @@ def test_ir_08_malformed_carrier_events_are_rejected(hooks: Webhooks) -> None:
 
 def test_unknown_routes_are_404(hooks: Webhooks) -> None:
     assert hooks.handle({"httpMethod": "PUT", "resource": "/webhooks/x"})["statusCode"] == 404
+
+
+def test_replay_media_reads_recorded_images_from_the_raw_bucket(s3: Any) -> None:
+    from services.webhooks.handler import ReplayMedia
+
+    s3.put_object(Bucket=RAW_BUCKET, Key="replay-media/900000000000001.png", Body=b"png")
+    media = ReplayMedia(RawStore(s3, RAW_BUCKET))
+
+    assert media.fetch("900000000000001") == (b"png", "image/png")
+    with pytest.raises(KeyError):
+        media.fetch("900000000000002")
+    with pytest.raises(ValueError):
+        media.fetch("../secrets")

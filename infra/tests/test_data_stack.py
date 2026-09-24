@@ -47,8 +47,6 @@ STREAMS = {"cases": "NEW_AND_OLD_IMAGES", "trace": "NEW_IMAGE", "audit": "NEW_IM
 SSM_KEYS = {
     "MODEL_SUPERVISOR_ID",
     "MODEL_SMALL_ID",
-    "GUARDRAIL_ID",
-    "GUARDRAIL_VERSION",
     "AR_POLICY_ARN",
     "SAP_READ_BASE",
     "SAP_WRITE_BASE",
@@ -314,7 +312,12 @@ def test_nfr_sec_03_empty_secret_containers_for_sandbox_and_mirror(
     found = secrets(data)
     key_id = logical_id(data, "AWS::KMS::Key")
 
-    assert sorted(found) == ["/aera/dev/sap/mirror-oauth-client", "/aera/dev/sap/sandbox-api-key"]
+    assert sorted(found) == [
+        "/aera/dev/channels/carrier-webhook",
+        "/aera/dev/channels/whatsapp",
+        "/aera/dev/sap/mirror-oauth-client",
+        "/aera/dev/sap/sandbox-api-key",
+    ]
     for secret in found.values():
         props = secret["Properties"]
         assert "SecretString" not in props
@@ -328,7 +331,11 @@ def test_nfr_sec_03_existing_approved_secret_is_referenced_not_duplicated() -> N
         env_name="dev", owner="aera-test-owner", sandbox_secret_name="/approved/sap-sandbox"
     )
 
-    assert sorted(secrets(template(settings))) == ["/aera/dev/sap/mirror-oauth-client"]
+    assert sorted(secrets(template(settings))) == [
+        "/aera/dev/channels/carrier-webhook",
+        "/aera/dev/channels/whatsapp",
+        "/aera/dev/sap/mirror-oauth-client",
+    ]
 
 
 def test_nfr_sec_03_no_secret_value_in_template(data: assertions.Template) -> None:
@@ -421,3 +428,31 @@ def test_data_settings_are_read_from_environment() -> None:
 def test_srd_6_16_owner_tag_is_required() -> None:
     with pytest.raises(ValueError, match="AERA_OWNER_TAG"):
         data_settings_from_environment({"AERA_ENV": "dev"})
+
+
+def test_ir_06_ses_may_write_only_under_ses_prefix_of_the_raw_bucket(
+    data: assertions.Template,
+) -> None:
+    policies = [
+        statement
+        for policy in data.find_resources("AWS::S3::BucketPolicy").values()
+        for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+        if statement.get("Principal") == {"Service": "ses.amazonaws.com"}
+    ]
+    [statement] = policies
+    assert statement["Action"] == "s3:PutObject"
+    assert statement["Effect"] == "Allow"
+    assert str(statement["Resource"]).endswith("/ses/*']}") or "/ses/*" in str(
+        statement["Resource"]
+    )
+    assert "aws:SourceAccount" in statement["Condition"]["StringEquals"]
+
+
+def test_ir_06_raw_bucket_announces_new_objects_on_eventbridge(data: assertions.Template) -> None:
+    buckets = data.find_resources("AWS::S3::Bucket")
+    raw = [b for b in buckets.values() if "raw" in str(b["Properties"]["BucketName"])]
+    assert raw, "raw bucket missing"
+    [bucket] = raw
+    assert bucket["Properties"]["NotificationConfiguration"]["EventBridgeConfiguration"] == {
+        "EventBridgeEnabled": True
+    }

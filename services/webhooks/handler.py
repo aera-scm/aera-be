@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import httpx
+from botocore.exceptions import ClientError
 
 from services.shared import http
 from services.shared.intake import Attachment, Inbound, Intake
@@ -203,24 +204,52 @@ def _carrier_text(payload: dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
+@dataclass
+class ReplayMedia:
+    """Recorded payloads (M1: no live WhatsApp number yet) name media ids whose images the
+    replay tool placed at `replay-media/<id>.<ext>` in the raw bucket. Enabled only when the
+    deployment sets AERA_WHATSAPP_MEDIA=replay."""
+
+    raw: Any
+
+    def fetch(self, media_id: str) -> tuple[bytes, str]:
+        if not media_id.isdigit():
+            raise ValueError("media ids are numeric")
+        for extension, mime in (("png", "image/png"), ("jpg", "image/jpeg")):
+            try:
+                return self.raw.get(f"replay-media/{media_id}.{extension}"), mime
+            except ClientError as error:
+                if error.response.get("Error", {}).get("Code") != "NoSuchKey":
+                    raise
+        raise KeyError(f"no replay media for {media_id}")
+
+
 _webhooks: Webhooks | None = None
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     global _webhooks
     if _webhooks is None:
+        import os
+
         from services.shared import runtime
         from services.shared.signals import RawStore
 
+        raw = RawStore(runtime.client("s3"), runtime.raw_bucket())
+        media: MediaFetcher = GraphMedia(
+            token=lambda: runtime.secret("channels/whatsapp")["accessToken"]
+        )
+        if os.environ.get("AERA_WHATSAPP_MEDIA") == "replay":
+            media = ReplayMedia(raw)
         _webhooks = Webhooks(
             intake=Intake(
                 dynamodb=runtime.client("dynamodb"),
-                raw=RawStore(runtime.client("s3"), runtime.raw_bucket()),
+                raw=raw,
                 bus=runtime.client("events"),
                 component="webhooks",
             ),
             whatsapp=lambda: runtime.secret("channels/whatsapp"),
             carrier_keys=lambda: runtime.secret("channels/carrier-webhook"),
-            media=GraphMedia(token=lambda: runtime.secret("channels/whatsapp")["accessToken"]),
+            media=media,
         )
     return _webhooks.handle(event)

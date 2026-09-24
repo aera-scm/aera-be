@@ -10,10 +10,12 @@ approved existing secrets ``AERA_SAP_SANDBOX_SECRET_NAME`` /
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from aws_cdk import App, DefaultStackSynthesizer, Environment, Stack, Tags
 
 from infra.constructs.github_oidc import GitHubOidc
+from infra.constructs.service_function import service_code
 from infra.environments import APPROVED_REGION, require_deployable_environment
 from infra.stacks.control import ControlStack
 from infra.stacks.data import DataStack
@@ -38,10 +40,18 @@ class DataSettings:
     cdk_qualifier: str | None = None
     github_provider_mode: str | None = None
     budget_name: str | None = None
+    lambda_bundle: str | None = None
+    console_origins: tuple[str, ...] = ()
+    inbound_recipients: tuple[str, ...] = ()
+    whatsapp_media: str = "graph"
 
 
 def _optional(environ: Mapping[str, str], name: str) -> str | None:
     return environ.get(name, "").strip() or None
+
+
+def _list(environ: Mapping[str, str], name: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in environ.get(name, "").split(",") if part.strip())
 
 
 def data_settings_from_environment(environ: Mapping[str, str]) -> DataSettings:
@@ -59,6 +69,10 @@ def data_settings_from_environment(environ: Mapping[str, str]) -> DataSettings:
         cdk_qualifier=_optional(environ, "AERA_CDK_QUALIFIER"),
         github_provider_mode=_optional(environ, "AERA_GITHUB_PROVIDER_MODE"),
         budget_name=_optional(environ, "AERA_BUDGET_NAME"),
+        lambda_bundle=_optional(environ, "AERA_LAMBDA_BUNDLE"),
+        console_origins=_list(environ, "AERA_CONSOLE_ORIGINS"),
+        inbound_recipients=_list(environ, "AERA_INBOUND_RECIPIENTS"),
+        whatsapp_media=_optional(environ, "AERA_WHATSAPP_MEDIA") or "graph",
     )
 
 
@@ -97,24 +111,43 @@ def build_app(settings: DataSettings) -> App:
         synthesizer=DefaultStackSynthesizer(qualifier=settings.cdk_qualifier),
         description="AERA data layer: tables, buckets, key, bus, parameters (SRD 6.20)",
     )
-    stacks: dict[str, Stack] = {"data": data}
+    common: dict[str, Any] = {
+        "env_name": env_name,
+        "env": Environment(region=APPROVED_REGION),
+        "synthesizer": DefaultStackSynthesizer(qualifier=settings.cdk_qualifier),
+    }
+
+    identity = IdentityStack(app, f"aera-{env_name}-identity", **common)
+    stacks: dict[str, Stack] = {
+        "data": data,
+        "identity": identity,
+        "edge": EdgeStack(
+            app,
+            f"aera-{env_name}-edge",
+            data=data,
+            pool_arn=identity.pool_arn,
+            code=service_code(settings.lambda_bundle),
+            console_origins=list(settings.console_origins),
+            inbound_recipients=list(settings.inbound_recipients),
+            whatsapp_media=settings.whatsapp_media,
+            **common,
+        ),
+        "gate": GateStack(
+            app,
+            f"aera-{env_name}-gate",
+            data=data,
+            code=service_code(settings.lambda_bundle),
+            **common,
+        ),
+    }
     for component, stack_type in (
-        ("identity", IdentityStack),
-        ("edge", EdgeStack),
-        ("gate", GateStack),
         ("reasoning", ReasoningStack),
         ("control", ControlStack),
         ("interop", InteropStack),
         ("web", WebStack),
         ("observability", ObservabilityStack),
     ):
-        stacks[component] = stack_type(
-            app,
-            f"aera-{env_name}-{component}",
-            env_name=env_name,
-            env=Environment(region=APPROVED_REGION),
-            synthesizer=DefaultStackSynthesizer(qualifier=settings.cdk_qualifier),
-        )
+        stacks[component] = stack_type(app, f"aera-{env_name}-{component}", **common)
     if settings.github_repository:
         GitHubOidc(
             stacks["identity"],

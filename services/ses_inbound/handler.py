@@ -79,15 +79,27 @@ class SesInbound:
     s3: Any
 
     def handle(self, event: dict[str, Any]) -> list[Signal]:
+        if event.get("detail-type") == "Object Created":
+            # The raw bucket's EventBridge notification (the deployed trigger); its keys are
+            # plain, unlike S3 notification records.
+            detail = event["detail"]
+            found = [(detail["bucket"]["name"], detail["object"]["key"], event.get("time"))]
+        else:
+            found = [
+                (
+                    record["s3"]["bucket"]["name"],
+                    unquote_plus(record["s3"]["object"]["key"]),
+                    record.get("eventTime"),
+                )
+                for record in event.get("Records") or []
+            ]
         signals = []
-        for record in event.get("Records") or []:
-            bucket = record["s3"]["bucket"]["name"]
-            key = unquote_plus(record["s3"]["object"]["key"])
+        for bucket, key, at in found:
             raw = self.s3.get_object(Bucket=bucket, Key=key)["Body"].read()
             inbound = to_inbound(raw)
-            if record.get("eventTime"):
+            if at:
                 # The Date: header is the sender's claim; SES's receipt time is ours.
-                received = datetime.fromisoformat(str(record["eventTime"]).replace("Z", "+00:00"))
+                received = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
                 inbound = replace(inbound, received_at=received.astimezone(UTC))
             signals.append(self.intake.receive(inbound))
         return signals

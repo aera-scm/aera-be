@@ -3,6 +3,7 @@
 from services.shared.defaults import (
     APPROVER_LIMITS,
     CONFIG_DEFAULTS,
+    GATE_PARAMETER_KEYS,
     RATE_CARD,
     SSM_PARAMETER_KEYS,
     ApproverLimit,
@@ -12,6 +13,7 @@ from services.shared.defaults import (
 __all__ = [
     "APPROVER_LIMITS",
     "CONFIG_DEFAULTS",
+    "GATE_PARAMETER_KEYS",
     "RATE_CARD",
     "SSM_PARAMETER_KEYS",
     "ApproverLimit",

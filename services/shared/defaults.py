@@ -40,6 +40,8 @@ SSM_PARAMETER_KEYS: tuple[str, ...] = (
     "SAP_WRITE_BASE",
     "SAP_SANDBOX_BASE",
 )
+# Written by the gate stack from the Guardrail it creates ("from CDK", SRD 6.23).
+GATE_PARAMETER_KEYS: tuple[str, ...] = ("GUARDRAIL_ID", "GUARDRAIL_VERSION")
 
 
 class RateCardEntry(TypedDict):

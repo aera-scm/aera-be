@@ -16,6 +16,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
+from build_lambda import bundle_problems
 from check_budget import (
     BudgetCheckError,
     BudgetReport,
@@ -82,6 +83,15 @@ def run(
             raise DeploymentRefusedError(
                 "AERA_OWNER_TAG is required: the owner tag on every resource (SRD 6.16)."
             )
+        # Without a built bundle the functions would deploy without their dependencies.
+        bundle = (environ or {}).get("AERA_LAMBDA_BUNDLE", "").strip()
+        problems = (
+            bundle_problems(Path(bundle))
+            if bundle
+            else ["AERA_LAMBDA_BUNDLE is required; run scripts/build_lambda.py first"]
+        )
+        if problems:
+            raise DeploymentRefusedError("; ".join(problems))
     environment = {"AERA_ENV": env_name, "AWS_REGION": region}
     profile_args = ("--profile", profile)
     bootstrap_args: tuple[str, ...] = ()

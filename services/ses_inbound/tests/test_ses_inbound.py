@@ -89,3 +89,30 @@ def test_s3_notification_turns_each_stored_mail_into_a_signal(
         s3.get_object(Bucket=RAW_BUCKET, Key=stored.raw_s3_key)["Body"].read() == supplier_email()
     )
     assert bus.types() == ["SignalReceived"]
+
+
+def test_the_raw_buckets_eventbridge_notification_is_understood(
+    dynamodb: Any, s3: Any, bus: RecordingBus
+) -> None:
+    s3.put_object(Bucket=RAW_BUCKET, Key="ses/abc+123", Body=supplier_email())
+    service = SesInbound(
+        intake=Intake(
+            dynamodb=dynamodb,
+            raw=RawStore(s3, RAW_BUCKET),
+            bus=bus,
+            component="ses-inbound",
+            env=ENV,
+        ),
+        s3=s3,
+    )
+
+    [signal] = service.handle(
+        {
+            "detail-type": "Object Created",
+            "source": "aws.s3",
+            "time": "2026-10-05T07:59:30Z",
+            "detail": {"bucket": {"name": RAW_BUCKET}, "object": {"key": "ses/abc+123"}},
+        }
+    )
+
+    assert signal.received_at.isoformat() == "2026-10-05T07:59:30+00:00"

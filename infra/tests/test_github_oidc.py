@@ -114,10 +114,12 @@ def test_existing_provider_is_not_recreated() -> None:
 def test_main_app_omits_oidc_without_owner_inputs() -> None:
     app = build_app(DataSettings(env_name="dev", owner="synthetic-owner"))
     for artifact in app.synth().stacks:
-        assert all(
-            resource["Type"] not in {"AWS::IAM::Role", "AWS::IAM::OIDCProvider"}
-            for resource in artifact.template["Resources"].values()
-        )
+        for resource in artifact.template["Resources"].values():
+            assert resource["Type"] != "AWS::IAM::OIDCProvider"
+            # Service roles (Lambda, Scheduler) exist from M1; none may trust GitHub.
+            if resource["Type"] == "AWS::IAM::Role":
+                trust = str(resource["Properties"]["AssumeRolePolicyDocument"])
+                assert "token.actions.githubusercontent.com" not in trust
 
 
 def test_main_app_wires_oidc_and_qualifier_to_all_stacks() -> None:

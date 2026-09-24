@@ -46,10 +46,13 @@ def test_nfr_mnt_02_all_stacks_and_dependencies() -> None:
             "owner": "synthetic-owner",
         }
         template = assertions.Template.from_stack(stack)
+        # M1 builds Lambdas in gate and edge only; M2+ resources do not exist yet.
+        if name not in {"gate", "edge"}:
+            template.resource_count_is("AWS::Lambda::Function", 0)
+        if name != "edge":
+            template.resource_count_is("AWS::ApiGateway::RestApi", 0)
         for resource in (
-            "AWS::Lambda::Function",
             "AWS::StepFunctions::StateMachine",
-            "AWS::ApiGateway::RestApi",
             "AWS::CloudFront::Distribution",
             "AWS::BedrockAgentCore::Runtime",
             "AWS::KinesisFirehose::DeliveryStream",
@@ -59,7 +62,13 @@ def test_nfr_mnt_02_all_stacks_and_dependencies() -> None:
     assert len(assembly.stacks) == 9
     for artifact in assembly.stacks:
         assert artifact.template.get("Resources")
-        if artifact.stack_name.removeprefix("aera-dev-") not in {"data", "identity", "web"}:
+        if artifact.stack_name.removeprefix("aera-dev-") not in {
+            "data",
+            "identity",
+            "web",
+            "gate",
+            "edge",
+        }:
             resources = list(artifact.template["Resources"].values())
             assert len(resources) == 1
             assert resources[0]["Type"] == "AWS::CloudFormation::WaitConditionHandle"

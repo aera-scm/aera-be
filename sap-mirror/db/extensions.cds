@@ -19,6 +19,10 @@ extend s4.A_PurchaseOrderScheduleLine with {
   MirrorETag : Timestamp @odata.etag @cds.on.insert: $now @cds.on.update: $now;
 }
 
+extend s4.A_PurchaseOrderItem with {
+  MirrorETag : Timestamp @odata.etag @cds.on.insert: $now @cds.on.update: $now;
+}
+
 // MRP exception feed (OI-07): not exposed by the listed S/4HANA APIs.
 entity MRPExceptionMessage {
   key MRPExceptionMessageID : String(10);

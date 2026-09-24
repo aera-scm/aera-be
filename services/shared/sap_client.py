@@ -267,6 +267,27 @@ class SapClient:
 
     # Internals --------------------------------------------------------------------------
 
+    def delete(
+        self,
+        service: str,
+        entity_set: str,
+        keys: Mapping[str, str],
+        *,
+        etag: str,
+        case_id: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        self._write(
+            "DELETE",
+            self._writer(),
+            service,
+            entity_ref(entity_set, keys),
+            {},
+            etag,
+            case_id,
+            run_id,
+        )
+
     def _writer(self) -> Endpoint:
         if self.write is None:
             raise PermissionError("no write endpoint configured (SAP_WRITE_BASE)")

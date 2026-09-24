@@ -18,6 +18,7 @@
           "SupplyingPlant"
         ],
         "A_PurchaseOrderItem": [
+          "PurchasingDocumentDeletionCode",
           "PurchaseOrderItemText",
           "Plant",
           "StorageLocation",

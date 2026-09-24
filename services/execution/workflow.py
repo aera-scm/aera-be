@@ -1,6 +1,6 @@
 """FR-EXE-02..08: ordered writes, undo first, verification and reverse compensation."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -44,6 +44,7 @@ class Step:
     action: Action
     target: str
     source_refs: tuple[str, ...]
+    substep: int = 0
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,10 @@ class Workflow:
     def run(self, execution: Execution) -> list[dict[str, Any]]:
         if not self.boundary.authorize(execution):
             raise PermissionError("persisted approval for exact plan part required")
-        if not execution.steps or len({s.index for s in execution.steps}) != len(execution.steps):
+        execution = self.expand(execution)
+        if not execution.steps or len({(s.index, s.target) for s in execution.steps}) != len(
+            execution.steps
+        ):
             raise ValueError("nonempty uniquely indexed steps required")
         if any(not step.source_refs for step in execution.steps):
             raise ValueError("every write requires source references")
@@ -234,6 +238,7 @@ class Workflow:
     def rollback(self, execution: Execution) -> None:
         if not self.boundary.authorize_rollback(execution):
             raise PermissionError("named rollback authority required")
+        execution = self.expand(execution)
         execution_key = f"EXEC#{execution.case_id}#{execution.version}#{execution.part_id}"
         record = self.journal.read(execution_key)
         if record is None or record["status"] != "SUCCEEDED":
@@ -257,3 +262,16 @@ class Workflow:
             self._release(execution, transfer)
         self.boundary.audit("ROLLED_BACK", {"partId": execution.part_id})
         self.journal.complete(rollback_key, {"status": "ROLLED_BACK"})
+
+    @staticmethod
+    def expand(execution: Execution) -> Execution:
+        steps: list[Step] = []
+        for step in execution.steps:
+            if step.action.type == "SPLIT_PO_SCHEDULE_LINE":
+                steps.extend(
+                    replace(step, target=f"{step.target}#part#{index}", substep=index)
+                    for index in range(len(step.action.parts))
+                )
+            else:
+                steps.append(step)
+        return replace(execution, steps=tuple(steps))

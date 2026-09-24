@@ -23,6 +23,7 @@ entity A_PurchaseOrder {
 entity A_PurchaseOrderItem {
   key PurchaseOrder : String(10);
   key PurchaseOrderItem : String(5);
+  PurchasingDocumentDeletionCode : String(1);
   PurchaseOrderItemText : String(40);
   Plant : String(4);
   StorageLocation : String(4);

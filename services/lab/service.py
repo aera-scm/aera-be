@@ -252,7 +252,9 @@ class Lab:
             outcome = "SIGNAL_BLOCKED"
         elif hostile and hostile.status is SignalStatus.ACCEPTED:
             outcome = "HOSTILE_NOT_BLOCKED"
-        elif hostile and hostile.status is SignalStatus.RECEIVED:
+        elif row["parameters"]["hostile"] and (
+            hostile is None or hostile.status is SignalStatus.RECEIVED
+        ):
             outcome = "IN_PROGRESS"
         elif case and case.status in TERMINAL:
             outcome = "RESOLVED" if case.status is CaseStatus.CLOSED else "ESCALATED"

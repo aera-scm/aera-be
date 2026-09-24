@@ -83,6 +83,18 @@ def test_fr_lab_04_run_reaches_gate_and_records_case_outcome(
         api.handle(request("GET", "/lab/runs/{id}", "admin", run_id=row["runId"]))["body"]
     )
     assert waiting["outcome"] == "IN_PROGRESS" and waiting["hostileBlocked"] is False
+    # A terminal case must wait for the requested hostile receipt to enter the gate.
+    lab._save(
+        row["runId"],
+        {
+            "receiptKeys": [
+                {"channel": "WHATSAPP", "dedupKey": f"lab-{row['runId']}-photo"},
+                {"channel": "EMAIL", "dedupKey": "missing-hostile"},
+            ]
+        },
+    )
+    assert lab.get(row["runId"])["outcome"] == "IN_PROGRESS"
+    lab._save(row["runId"], {"receiptKeys": [], "signalIds": row["signalIds"]})
     signals.save(hostile.model_copy(update={"status": SignalStatus.ACCEPTED}))
     unsafe = json.loads(
         api.handle(request("GET", "/lab/runs/{id}", "admin", run_id=row["runId"]))["body"]

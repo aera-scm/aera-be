@@ -27,6 +27,7 @@ from typing import Any
 from services.api import whatif
 from services.api.admin import Admin, AdminError
 from services.api.chat import Chat
+from services.reporting.metrics import kpis
 from services.routing.store import ApprovalConflict, ControlStore
 from services.rules.br_13 import board_key, rank_reason
 from services.run_starter.handler import STARTABLE
@@ -469,7 +470,7 @@ class Api:
         mrp = from_item(item, keep_decimals=False) if item else {}
         for key in ("PK", "SK"):
             mrp.pop(key, None)
-        return {"mrp": mrp}
+        return {"mrp": mrp, "kpis": kpis(self.dynamodb, self.env or "dev")}
 
     # Commands ---------------------------------------------------------------------------
 

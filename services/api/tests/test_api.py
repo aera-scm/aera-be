@@ -114,6 +114,17 @@ def test_fr_tri_01_board_is_ranked_by_score_then_time_to_line_stop(api: Api, dyn
     assert [r["caseId"] for r in only_new] == ["EXC-2026-0917"]
 
 
+def test_fr_rpt_02_metrics_endpoint_keeps_measured_basis(api: Api, dynamodb: Any) -> None:
+    make_case(dynamodb, 914, 4_720_000, 6.2, CaseStatus.TRIAGED)
+
+    values = body(api.handle(request("GET", "/metrics")))
+
+    assert values["kpis"]["basis"] == "reference scenario (synthetic SAP Mirror)"
+    assert values["kpis"]["caseCount"]["value"] == 1
+    assert values["kpis"]["costPerCase"]["value"] is None
+    assert api.handle(request("GET", "/metrics", groups="supplier"))["statusCode"] == 403
+
+
 def test_fr_neg_03_dialogue_thread_exposes_case_scoped_status(
     api: Api, dynamodb: Any
 ) -> None:

@@ -62,6 +62,7 @@ class VerifierService:
         self._table = table_name("cases", self.env)
 
     def _emit(self, kind: Any, case_id: str, data: dict[str, Any]) -> None:
+        data = {"caseId": case_id, **data}
         emit(self.bus, kind, data, component=COMPONENT, case_id=case_id, environment=self.env)
 
     def policy(self) -> Policy:

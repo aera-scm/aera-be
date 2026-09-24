@@ -57,6 +57,25 @@ def test_fr_opz_02_sizes_an_action_and_rejects_a_late_candidate() -> None:
     assert result.objective_cents == 40_000
 
 
+def test_br_20_selects_only_one_freight_mode_per_shipment() -> None:
+    demands = [need("one", 100, 1_000), need("two", 100, 900)]
+    candidates = [
+        Candidate(
+            "one", "air", NOW + timedelta(hours=2), 100, 0, 10,
+            (), "ratecard:AIR", exclusive_group="PO-1#10",
+        ),
+        Candidate(
+            "two", "road", NOW + timedelta(hours=3), 100, 0, 10,
+            (), "ratecard:ROAD", exclusive_group="PO-1#10",
+        ),
+    ]
+
+    result = solve(demands, candidates, [])
+
+    assert [(a.candidate_id, a.quantity) for a in result.allocations] == [("air", 100)]
+    assert result.objective_cents == 91_000
+
+
 def test_nfr_perf_06_thirty_cases_two_hundred_candidates_under_five_seconds() -> None:
     demands = [need(f"case-{i:02d}", 100, 1_000 + i) for i in range(30)]
     candidates = [

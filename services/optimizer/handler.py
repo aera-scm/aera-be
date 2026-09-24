@@ -37,6 +37,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             resources=tuple(str(key) for key in row["resources"]),
             source_ref=str(row["sourceRef"]),
             sizeable=row.get("sizeable", True),
+            exclusive_group=(
+                str(row["exclusiveGroup"]) if row.get("exclusiveGroup") is not None else None
+            ),
         )
         for row in event["candidates"]
     ]

@@ -37,6 +37,7 @@ class Candidate:
     resources: tuple[str, ...]
     source_ref: str
     sizeable: bool = True
+    exclusive_group: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,7 @@ def _validate(needs: list[Need], candidates: list[Candidate], capacities: list[C
             or not action.source_ref
             or action.arrival.tzinfo is None
             or not isinstance(action.sizeable, bool)
+            or (action.exclusive_group is not None and not action.exclusive_group.strip())
             or len(action.resources) != len(set(action.resources))
             or any(resource not in limits for resource in action.resources)
         ):
@@ -117,6 +119,8 @@ def solve(
         model.add(quantity[action.id] >= chosen[action.id])
         if not action.sizeable:
             model.add(quantity[action.id] == action.max_quantity * chosen[action.id])
+    for group in {a.exclusive_group for a in candidates if a.exclusive_group is not None}:
+        model.add(sum(chosen[a.id] for a in candidates if a.exclusive_group == group) <= 1)
     for capacity in capacities:
         model.add(
             sum(quantity[a.id] for a in candidates if capacity.resource in a.resources)
@@ -181,6 +185,10 @@ def _check_result(
     """Fail closed if solver output violates a hard constraint or its own objective."""
     selected = {a.candidate_id: a for a in result.allocations}
     offered = {a.id: a for a in candidates}
+    groups = [offered[a.candidate_id].exclusive_group for a in result.allocations]
+    active_groups = [group for group in groups if group is not None]
+    if len(active_groups) != len(set(active_groups)):
+        raise ValueError("solver selected mutually exclusive actions")
     for allocation in result.allocations:
         action = offered[allocation.candidate_id]
         if not 0 < allocation.quantity <= action.max_quantity:

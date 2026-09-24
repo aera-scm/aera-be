@@ -77,6 +77,7 @@ class Harness:
                     runs.history(case_id),
                     mode=str(payload.get("mode", "investigate")),
                     reason=payload.get("reason"),
+                    constraints=dict(payload.get("constraints") or {}),
                 )
             )
             usage = dict(getattr(agent.event_loop_metrics, "accumulated_usage", {}) or {})

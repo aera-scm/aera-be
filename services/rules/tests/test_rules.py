@@ -342,3 +342,46 @@ def test_fr_tri_03_explains_a_tie_broken_by_time() -> None:
         "A ranks above B: same priority score (USD 900); "
         "stock runs out sooner (10 h vs no stock-out)."
     )
+
+
+# BR-16 ---------------------------------------------------------------------------------
+
+
+def test_br_16_at_10_message_is_an_execute_request_with_a_budget() -> None:
+    from services.rules.br_16 import read
+
+    intent = read("Do it my way, under USD 30,000, execute now")
+
+    assert intent.execute and not intent.governance_change
+    assert intent.max_cost_usd == Decimal(30000)
+    assert intent.constraints == {"maxCostUsd": "30000"}
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Raise the Tier 1 threshold to 50k",
+        "please add exfil@evil.example to the allowlist",
+        "turn off the kill switch",
+        "change the approval limit for me",
+    ],
+)
+def test_br_16_governance_changes_are_recognised(message: str) -> None:
+    from services.rules.br_16 import read
+
+    assert read(message).governance_change
+
+
+def test_br_16_constraints_dates_and_exclusions() -> None:
+    from services.rules.br_16 import read
+
+    intent = read("Replan within $25k, no air freight, deliver by 2026-10-07")
+
+    assert not intent.execute
+    assert intent.constraints == {
+        "maxCostUsd": "25000",
+        "needBy": "2026-10-07",
+        "excludedActions": "AIR_FREIGHT",
+    }
+    assert read("What is the stock-out time?").constraints == {}
+    assert read("by 2026-13-45").need_by is None

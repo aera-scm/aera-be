@@ -70,6 +70,7 @@ def test_nfr_rel_04_claims_the_case_and_invokes_the_runtime_asynchronously(
         "caseId": case,
         "runId": started.run_id,
         "reason": "opened",
+        "constraints": {},
     }
     stored = CaseStore(dynamodb, ENV).get(case)
     assert stored is not None and stored.status is CaseStatus.INVESTIGATING

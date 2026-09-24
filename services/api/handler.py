@@ -24,6 +24,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from services.api.admin import Admin, AdminError
+from services.api.chat import Chat
 from services.rules.br_13 import board_key, rank_reason
 from services.run_starter.handler import STARTABLE
 from services.shared import http
@@ -48,6 +50,7 @@ COMPONENT = "api"
 READERS = frozenset({"planner", "approver", "admin"})
 PLANNERS = frozenset({"planner", "admin"})
 APPROVERS = frozenset({"approver"})
+ADMINS = frozenset({"admin"})
 TICKET_SECONDS = 60
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 UPLOAD_TYPES = {"application/pdf", "image/jpeg", "image/png", "text/plain"}
@@ -103,8 +106,11 @@ class Api:
     env: str | None = None
     states: Any = None
     execution_arn: str = ""
+    scan: Callable[[str], str | None] = lambda text: None
+    admin: Admin | None = None
 
     def __post_init__(self) -> None:
+        self.chat = Chat(self.dynamodb, self.bus, scan=self.scan, clock=self.clock, env=self.env)
         self.cases = CaseStore(self.dynamodb, self.env)
         self.signals = SignalStore(self.dynamodb, self.env)
         self.trace = TraceStore(self.dynamodb, self.env)
@@ -126,6 +132,13 @@ class Api:
                 )
             if method == "GET":
                 return self._get(resource, params, event, user)
+            if method == "PUT" and resource == "/admin/config/{key}":
+                _require(user, ADMINS)
+                return self._admin(
+                    lambda admin: admin.set_config(
+                        params["key"], _json_body(event).get("value"), f"user:{user.id}"
+                    )
+                )
             raise Problem(405, "Method not allowed")
         except Problem as problem:
             return problem.response
@@ -163,6 +176,13 @@ class Api:
         if resource == "/cases/{id}/rollback":
             _require(user, APPROVERS)
             return self.rollback(params["id"], user)
+        if resource in ("/admin/killswitch", "/admin/reset"):
+            _require(user, ADMINS)
+            body = _json_body(event)
+            actor = f"user:{user.id}"
+            if resource == "/admin/killswitch":
+                return self._admin(lambda admin: admin.kill_switch(body.get("on"), actor))
+            return self._admin(lambda admin: admin.reset(body.get("confirm"), actor))
         _require(user, PLANNERS)
         body = _json_body(event)
         if resource == "/signals":
@@ -171,7 +191,20 @@ class Api:
             return http.response(200, self.confirm(params["id"], params["fieldId"], body, user))
         if resource == "/cases/{id}/runs":
             return self.start_run(params["id"], user)
+        if resource == "/cases/{id}/chat":
+            message = body.get("message")
+            if not isinstance(message, str) or not message.strip():
+                raise Problem(400, "Missing message")
+            return http.response(200, self.chat.handle(self._case(params["id"]), user.id, message))
         raise Problem(404, "Not found")
+
+    def _admin(self, action: Callable[[Admin], dict[str, Any]]) -> dict[str, Any]:
+        if self.admin is None:
+            raise Problem(503, "Administration is not configured in this environment")
+        try:
+            return http.response(200, action(self.admin))
+        except AdminError as error:
+            raise Problem(400, "Refused", str(error)) from None
 
     def rollback(self, case_id: str, user: User) -> dict[str, Any]:
         """FR-EXE-08, FR-MON-03: an approver rolls back a reopened case's executed plan. The
@@ -514,5 +547,37 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             bus=bus,
             states=runtime.client("stepfunctions"),
             execution_arn=os.environ.get("AERA_EXECUTION_STATE_MACHINE_ARN", ""),
+            scan=_guardrail_scan(runtime),
+            admin=_admin_service(runtime, dynamodb),
         )
     return _api.handle(event)
+
+
+def _guardrail_scan(runtime: Any) -> Callable[[str], str | None]:
+    from services.gatekeeper.handler import Guardrail
+
+    guardrail = Guardrail(
+        runtime.client("bedrock-runtime"),
+        lambda: runtime.parameter("GUARDRAIL_ID"),
+        lambda: runtime.parameter("GUARDRAIL_VERSION"),
+    )
+
+    def scan(text: str) -> str | None:  # FR-CHT-04
+        result = guardrail.scan(text)
+        return result.reason if result.blocked else None
+
+    return scan
+
+
+def _admin_service(runtime: Any, dynamodb: Any) -> Admin:
+    from services.api.admin import mirror_reset_via
+
+    sap = runtime.sap_client()
+    auth = sap.read.auth
+    return Admin(
+        dynamodb=dynamodb,
+        mirror_reset=mirror_reset_via(
+            sap.read.base_url, auth.apply if auth else (lambda headers: None)
+        ),
+        env=runtime.env(),
+    )

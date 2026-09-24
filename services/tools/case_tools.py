@@ -11,13 +11,14 @@
 from __future__ import annotations
 
 import secrets
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
 from pydantic import ValidationError
 
 from services.rules.br_02 import usable
-from services.shared.dynamo import table_name, to_item
+from services.shared.dynamo import from_item, table_name, to_item
 from services.shared.models import CaseStatus, PlanRecord, ProposedPlan, SignalStatus, new_ulid
 from services.shared.runtime import emit
 from services.tools.calc import draft_exists
@@ -179,6 +180,9 @@ def propose_plan(ctx: ToolContext, case_id: str, plan: dict[str, Any]) -> dict[s
                 for oid in ungrounded
             ],
         }
+    breaches = constraint_breaches(ctx, case_id, proposal)
+    if breaches:
+        return {"accepted": False, "errors": breaches}
     record = PlanRecord(plan=proposal, proposed_at=ctx.now())
     table = table_name("cases", ctx.env)
     ctx.dynamodb.put_item(
@@ -224,6 +228,41 @@ def propose_plan(ctx: ToolContext, case_id: str, plan: dict[str, Any]) -> dict[s
             "coverageUnits": coverage,
         }
     )
+
+
+ACTION_OF = {
+    "AIR_FREIGHT": "BOOK_AIR_FREIGHT",
+    "ALTERNATE_SUPPLIER": "CREATE_PO_ALTERNATE",
+    "STO": "CREATE_STO",
+}
+
+
+def constraint_breaches(ctx: ToolContext, case_id: str, plan: ProposedPlan) -> list[str]:
+    """FR-CHT-01: a re-plan must respect the planner's stated constraints (set by chat)."""
+    item = ctx.dynamodb.get_item(
+        TableName=table_name("cases", ctx.env),
+        Key={"PK": {"S": f"CASE#{case_id}"}, "SK": {"S": "CONSTRAINTS"}},
+        ConsistentRead=True,
+    ).get("Item")
+    if item is None:
+        return []
+    limits = from_item(item, keep_decimals=False)
+    chosen = [o for o in plan.options if o.id in plan.chosen]
+    breaches = []
+    if "maxCostUsd" in limits and plan.total_cost_usd > Decimal(str(limits["maxCostUsd"])):
+        breaches.append(
+            f"chosen plan costs USD {plan.total_cost_usd} above the planner's budget "
+            f"USD {limits['maxCostUsd']}"
+        )
+    for excluded in str(limits.get("excludedActions") or "").split(","):
+        if excluded and any(a.type == ACTION_OF.get(excluded) for o in chosen for a in o.actions):
+            breaches.append(f"the planner excluded {excluded}")
+    if "needBy" in limits:
+        need_by = date.fromisoformat(str(limits["needBy"]))
+        late = [o.id for o in chosen if o.arrival.date() > need_by]
+        if late:
+            breaches.append(f"options {', '.join(late)} arrive after {need_by}")
+    return breaches
 
 
 def escalate(ctx: ToolContext, case_id: str, reason: str) -> dict[str, Any]:

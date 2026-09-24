@@ -22,7 +22,12 @@ def system_prompt(version: str = PROMPT_VERSION) -> str:
 
 
 def opening_message(
-    case: Case, history: list[dict[str, Any]], *, mode: str, reason: str | None
+    case: Case,
+    history: list[dict[str, Any]],
+    *,
+    mode: str,
+    reason: str | None,
+    constraints: dict[str, str] | None = None,
 ) -> str:
     record = case.model_dump(
         mode="json",
@@ -53,6 +58,12 @@ def opening_message(
     return "\n".join(
         [
             f"Mode: {mode}. Reason for this run: {reason or 'new case'}.",
+            (
+                "Planner constraints for this plan (propose_plan enforces them): "
+                + json.dumps(constraints)
+                if constraints
+                else "No planner constraints."
+            ),
             "Case record (from AERA, SAP-derived):",
             json.dumps(record, indent=2),
             "Earlier runs of this case:",

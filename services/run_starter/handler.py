@@ -23,7 +23,15 @@ from services.shared.runs import RunStore
 from services.shared.runtime import emit
 
 COMPONENT = "run-starter"
-STARTABLE = (CaseStatus.TRIAGED, CaseStatus.WAITING_PLANNER, CaseStatus.WAITING_SUPPLIER)
+STARTABLE = (
+    CaseStatus.TRIAGED,
+    CaseStatus.WAITING_PLANNER,
+    CaseStatus.WAITING_SUPPLIER,
+    # Re-planning (FR-CHT-01): a proposed, rejected or escalated plan may be redone.
+    CaseStatus.PLAN_PROPOSED,
+    CaseStatus.REJECTED,
+    CaseStatus.ESCALATED,
+)
 _log = get_logger("run-starter")
 
 
@@ -54,6 +62,7 @@ class RunStarter:
         mode: str = "investigate",
         actor: str = "system",
         run_id: str | None = None,
+        constraints: dict[str, str] | None = None,
     ) -> Started:
         case = self.cases.get(case_id)
         if case is None:
@@ -77,7 +86,13 @@ class RunStarter:
         except (IllegalTransitionError, ConcurrentUpdateError):
             self.runs.release(case_id, run_id, end_reason="LIMIT_ERROR", summary="not started")
             return Started(None, "case changed while starting")
-        payload = {"mode": mode, "caseId": case_id, "runId": run_id, "reason": reason}
+        payload: dict[str, Any] = {
+            "mode": mode,
+            "caseId": case_id,
+            "runId": run_id,
+            "reason": reason,
+            "constraints": constraints or {},
+        }
         try:
             self.agentcore.invoke_agent_runtime(
                 agentRuntimeArn=self.runtime_arn(),
@@ -136,6 +151,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         str(data["caseId"]),
         reason=str(data.get("reason") or "ready"),
         run_id=data.get("runId"),
+        mode=str(data.get("mode") or "investigate"),
+        constraints=dict(data.get("constraints") or {}),
         actor=str(event.get("detail", {}).get("actor") or "system"),
     )
     return {"runId": started.run_id, "reason": started.reason}

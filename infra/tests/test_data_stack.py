@@ -383,10 +383,12 @@ def test_srd_6_16_data_stack_has_no_compute_or_custom_resources(
     assert not any(t.startswith(("AWS::Lambda::", "Custom::", "AWS::IAM::Role")) for t in types)
 
 
-def test_srd_6_16_app_holds_only_the_data_stack_for_now() -> None:
+def test_srd_6_16_app_contains_data_and_keeps_budget_independent() -> None:
     assembly = build_app(SETTINGS).synth()
 
-    assert [stack.stack_name for stack in assembly.stacks] == ["aera-dev-data"]
+    names = {stack.stack_name for stack in assembly.stacks}
+    assert "aera-dev-data" in names
+    assert "aera-dev-budget" not in names
 
 
 @pytest.mark.parametrize("env_name", ["final", "prod", ""])

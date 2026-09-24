@@ -11,10 +11,18 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from aws_cdk import App, Environment, Tags
+from aws_cdk import App, Environment, Stack, Tags
 
 from infra.environments import APPROVED_REGION, require_deployable_environment
+from infra.stacks.control import ControlStack
 from infra.stacks.data import DataStack
+from infra.stacks.edge import EdgeStack
+from infra.stacks.gate import GateStack
+from infra.stacks.identity import IdentityStack
+from infra.stacks.interop import InteropStack
+from infra.stacks.observability import ObservabilityStack
+from infra.stacks.reasoning import ReasoningStack
+from infra.stacks.web import WebStack
 
 
 @dataclass(frozen=True)
@@ -73,13 +81,44 @@ def build_app(settings: DataSettings) -> App:
         env=Environment(region=APPROVED_REGION),
         description="AERA data layer: tables, buckets, key, bus, parameters (SRD 6.20)",
     )
-    for key, value in (
-        ("project", "aera"),
-        ("env", env_name),
-        ("component", "data"),
-        ("owner", settings.owner),
+    stacks: dict[str, Stack] = {"data": data}
+    for component, stack_type in (
+        ("identity", IdentityStack),
+        ("edge", EdgeStack),
+        ("gate", GateStack),
+        ("reasoning", ReasoningStack),
+        ("control", ControlStack),
+        ("interop", InteropStack),
+        ("web", WebStack),
+        ("observability", ObservabilityStack),
     ):
-        Tags.of(data).add(key, value)
+        stacks[component] = stack_type(
+            app,
+            f"aera-{env_name}-{component}",
+            env_name=env_name,
+            env=Environment(region=APPROVED_REGION),
+        )
+    dependencies = {
+        "identity": ("data",),
+        "edge": ("data", "identity"),
+        "gate": ("data",),
+        "reasoning": ("data", "gate"),
+        "control": ("data", "reasoning"),
+        "interop": ("edge", "identity"),
+        "web": ("edge", "identity"),
+        "observability": tuple(name for name in stacks if name != "observability"),
+    }
+    for component, prerequisites in dependencies.items():
+        for prerequisite in prerequisites:
+            stacks[component].add_stack_dependency(stacks[prerequisite])
+    for component, stack in stacks.items():
+        for key, value in (
+            ("project", "aera"),
+            ("env", env_name),
+            ("component", component),
+            ("owner", settings.owner),
+        ):
+            Tags.of(stack).add(key, value)
     return app
 
 

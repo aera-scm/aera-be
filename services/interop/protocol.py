@@ -143,7 +143,7 @@ TOOLS = [
 ]
 
 
-def mcp(request: Any, client: str, invoke: Invoke) -> dict[str, Any]:
+def mcp(request: Any, client: str, invoke: Invoke) -> dict[str, Any] | None:
     if not isinstance(request, dict):
         return _error(None, -32600, "Invalid request")
     request_id = request.get("id")
@@ -151,6 +151,8 @@ def mcp(request: Any, client: str, invoke: Invoke) -> dict[str, Any]:
     params = request.get("params") or {}
     if request.get("jsonrpc") != "2.0" or not isinstance(params, dict):
         return _error(request_id, -32600, "Invalid request")
+    if method == "notifications/initialized" and "id" not in request:
+        return None
     if method == "initialize":
         return _result(
             request_id,

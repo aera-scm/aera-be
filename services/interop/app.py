@@ -86,7 +86,13 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ("/", "/invocations") and mode == "A2A":
             self._send(200, a2a(request, client, invoke_api))
         elif self.path in ("/mcp", "/invocations") and mode == "MCP":
-            self._send(200, mcp(request, client, invoke_api))
+            result = mcp(request, client, invoke_api)
+            if result is None:
+                self.send_response(202)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            else:
+                self._send(200, result)
         else:
             self._send(404, {"error": "not found"})
 

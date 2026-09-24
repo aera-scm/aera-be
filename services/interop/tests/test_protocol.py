@@ -78,6 +78,7 @@ def test_br_21_a2a_and_mcp_refuse_control_methods() -> None:
     )
     assert denied["error"]["code"] == -32601
     listed = mcp({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, "aera-client", forbidden)
+    assert listed is not None
     assert {tool["name"] for tool in listed["result"]["tools"]} == {
         "list_cases",
         "get_case_summary",
@@ -88,6 +89,7 @@ def test_br_21_a2a_and_mcp_refuse_control_methods() -> None:
         "aera-client",
         forbidden,
     )
+    assert denied_tool is not None
     assert denied_tool["error"]["code"] == -32602
 
 
@@ -108,5 +110,20 @@ def test_fr_int_02_mcp_calls_only_read_service_operation() -> None:
         "aera-client",
         invoke,
     )
+    assert result is not None
     assert json.loads(result["result"]["content"][0]["text"]) == {"caseId": "EXC-2026-0914"}
     assert calls == ["get_case_status"]
+
+
+def test_fr_int_02_mcp_initialization_notification_has_no_response() -> None:
+    def forbidden(*args: Any) -> dict[str, Any]:
+        raise AssertionError("notification must not reach service API")
+
+    assert (
+        mcp(
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            "aera-client",
+            forbidden,
+        )
+        is None
+    )

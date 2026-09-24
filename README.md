@@ -148,3 +148,8 @@ make provision-secrets ENV=dev   # SAP_SANDBOX_API_KEY from your shell into the 
 own process, never from arguments or files, and never prints it.
 
 Built for the AWS / SAP Agentic AI Hackathon, track: Intelligent Supply Chain.
+# SAP sandbox prerequisite
+
+Read-only SAP transport and official metadata checks are described in
+[`sap-mirror/metadata/README.md`](sap-mirror/metadata/README.md) (IR-01, IR-02).
+Synthetic test success is not live sandbox or schema evidence.

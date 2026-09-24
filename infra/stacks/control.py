@@ -194,6 +194,15 @@ class ControlStack(Stack):
                 resources=[self.format_arn(service="ses", resource="identity", resource_name="*")],
             )
         )
+        events.Rule(
+            self,
+            "SupplierDialogueSweep",
+            rule_name=f"aera-{env_name}-dialogue-sweep",
+            schedule=events.Schedule.rate(Duration.minutes(1)),
+            targets=[targets.LambdaFunction(
+                notifier, event=events.RuleTargetInput.from_object({"task": "dialogueSweep"})
+            )],
+        )
         monitor = ServiceFunction(
             self,
             "monitor",

@@ -50,7 +50,7 @@ def start(
         or timeout <= timedelta(0)
     ):
         raise ValueError("dialogue requires case, supplier, token and aware times")
-    deadline = min(sent_at + timeout, stockout_at - timedelta(minutes=1))
+    deadline = min(sent_at + timeout, stockout_at - timedelta(minutes=5))
     if deadline <= sent_at:
         raise ValueError("supplier question cannot finish before stock-out")
     return Thread(

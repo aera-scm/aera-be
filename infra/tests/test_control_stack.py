@@ -145,9 +145,15 @@ def test_notifier_and_monitor_listen_on_the_bus(
     rules = {
         r["Properties"]["Name"]: r["Properties"]["EventPattern"]["detail-type"]
         for r in templates["control"].find_resources("AWS::Events::Rule").values()
+        if "EventPattern" in r["Properties"]
     }
     assert rules["aera-dev-notifier"] == ["NotificationRequested"]
+    assert rules["aera-dev-supplierdialogue"] == ["SupplierInfoRequested"]
     assert rules["aera-dev-monitor"] == ["GoodsReceiptDue"]
+    sweep = templates["control"].find_resources("AWS::Events::Rule", {
+        "Properties": {"Name": "aera-dev-dialogue-sweep"}
+    })
+    assert len(sweep) == 1
 
 
 def test_srd_6_6_verifier_runs_on_plan_proposed_and_cannot_write_to_sap(
@@ -157,6 +163,7 @@ def test_srd_6_6_verifier_runs_on_plan_proposed_and_cannot_write_to_sap(
     rules = {
         r["Properties"]["Name"]: r["Properties"]["EventPattern"]["detail-type"]
         for r in control.find_resources("AWS::Events::Rule").values()
+        if "EventPattern" in r["Properties"]
     }
     assert rules["aera-dev-verifier"] == ["PlanProposed"]
     env = lambda_env(control)["aera-dev-verifier"]

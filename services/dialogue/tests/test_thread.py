@@ -38,7 +38,7 @@ def test_at_22_one_reminder_then_escalation_before_stockout() -> None:
 
 def test_at_22_earlier_stockout_shortens_timeout() -> None:
     initial = thread(2)
-    assert initial.deadline == NOW + timedelta(hours=2, minutes=-1)
+    assert initial.deadline == NOW + timedelta(hours=2, minutes=-5)
     assert tick(initial, initial.deadline)[1] is TimeoutAction.ESCALATE
     assert initial.deadline < NOW + timedelta(hours=2)
 

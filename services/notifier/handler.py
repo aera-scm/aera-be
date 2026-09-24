@@ -18,13 +18,15 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from services.dialogue.facts import load_facts
 from services.dialogue.policy import Template, render_question
+from services.dialogue.thread import DialogueStatus, Thread, TimeoutAction, start, tick
 from services.shared.audit import AuditWriter
-from services.shared.cases import CaseStore
+from services.shared.cases import CaseStore, ConcurrentUpdateError
+from services.shared.config import Config
 from services.shared.dynamo import from_item, table_name, to_item
 from services.shared.models import Case, CaseStatus
 from services.shared.partner import partner_emails
@@ -85,6 +87,7 @@ class Notifier:
         self.audit = AuditWriter(self.dynamodb, self.env)
         self._cases = table_name("cases", self.env)
         self._config = table_name("config", self.env)
+        self.config = Config(self.dynamodb, self.env)
         self._dialogue = table_name("dialogue", self.env)
 
     def handle_dialogue(self, data: dict[str, Any]) -> list[dict[str, str]]:
@@ -119,6 +122,19 @@ class Notifier:
             self._block_dialogue(key, "V-14 or master-data check failed")
             return [{"status": "BLOCKED"}]
         recipient = expected.recipient
+        case = self.cases.get(case_id)
+        if case is None or case.stockout_at is None:
+            self._block_dialogue(key, "stock-out time unavailable for supplier timeout")
+            return [{"status": "BLOCKED"}]
+        try:
+            schedule = start(
+                case_id, facts.supplier_id, expected.reference_token,
+                self.clock(), case.stockout_at,
+                timeout=timedelta(hours=float(self.config.decimal("SUPPLIER_REPLY_TIMEOUT_HOURS"))),
+            )
+        except ValueError:
+            self._block_dialogue(key, "no safe supplier reply window")
+            return [{"status": "BLOCKED"}]
         standin = self.standins().get(recipient)
         sender = self.sender()
         if not standin or not sender or self.ses is None:
@@ -156,13 +172,19 @@ class Notifier:
                     ":reason": {"S": "SES send result unavailable"},
                 },
             )
+            self._ensure_dialogue_escalated(case_id, message_id, "supplier send unavailable")
             return [{"status": "BLOCKED"}]
         self.dynamodb.update_item(
             TableName=self._dialogue, Key=key,
-            UpdateExpression="SET #s = :sent, sentAt = :now",
+            UpdateExpression=(
+                "SET #s = :sent, sentAt = :now, remindAt = :remind, "
+                "deadline = :deadline, reminderSent = :no"
+            ),
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
-                ":sent": {"S": "SENT"}, ":now": {"S": self.clock().isoformat()},
+                ":sent": {"S": "SENT"}, ":now": {"S": schedule.sent_at.isoformat()},
+                ":remind": {"S": schedule.remind_at.isoformat()},
+                ":deadline": {"S": schedule.deadline.isoformat()}, ":no": {"BOOL": False},
             },
         )
         self.audit.record(
@@ -171,6 +193,111 @@ class Notifier:
                      "recipient": recipient, "sourceRef": expected.source_ref},
         )
         return [{"recipient": recipient, "status": "SENT"}]
+
+    def sweep_dialogue(self) -> list[dict[str, str]]:
+        outcomes: list[dict[str, str]] = []
+        cursor: dict[str, Any] | None = None
+        while True:
+            args: dict[str, Any] = {
+                "TableName": self._dialogue,
+                "FilterExpression": (
+                    "#s = :sent OR ((#s = :blocked OR #s = :timedout) "
+                    "AND attribute_not_exists(escalationDone))"
+                ),
+                "ExpressionAttributeNames": {"#s": "status"},
+                "ExpressionAttributeValues": {
+                    ":sent": {"S": "SENT"}, ":blocked": {"S": "BLOCKED"},
+                    ":timedout": {"S": "TIMED_OUT"},
+                },
+            }
+            if cursor is not None:
+                args["ExclusiveStartKey"] = cursor
+            page = self.dynamodb.scan(**args)
+            for item in page.get("Items", []):
+                record = from_item(item)
+                outcomes.append(self.tick_dialogue(str(record["caseId"]), str(record["messageId"])))
+            cursor = page.get("LastEvaluatedKey")
+            if cursor is None:
+                return outcomes
+
+    def tick_dialogue(self, case_id: str, message_id: str) -> dict[str, str]:
+        key = {"PK": {"S": f"CASE#{case_id}"}, "SK": {"S": f"MSG#{message_id}"}}
+        item = self.dynamodb.get_item(TableName=self._dialogue, Key=key).get("Item")
+        if item is None:
+            return {"status": "MISSING"}
+        record = from_item(item)
+        if record.get("status") in {"BLOCKED", "TIMED_OUT"}:
+            done = self._ensure_dialogue_escalated(
+                case_id, message_id, "supplier question blocked or timed out"
+            )
+            return {"status": "ESCALATED" if done else "UNCHANGED"}
+        if record.get("status") != "SENT":
+            return {"status": "UNCHANGED"}
+        thread = Thread(
+            case_id, str(record["supplierId"]), str(record["referenceToken"]),
+            datetime.fromisoformat(str(record["sentAt"])),
+            datetime.fromisoformat(str(record["remindAt"])),
+            datetime.fromisoformat(str(record["deadline"])),
+            DialogueStatus.WAITING, bool(record.get("reminderSent")),
+        )
+        _, action = tick(thread, self.clock())
+        if action is TimeoutAction.NONE:
+            return {"status": "UNCHANGED"}
+        if action is TimeoutAction.ESCALATE:
+            try:
+                self.dynamodb.update_item(
+                    TableName=self._dialogue, Key=key,
+                    UpdateExpression="SET #s = :timedout",
+                    ConditionExpression="#s = :sent",
+                    ExpressionAttributeNames={"#s": "status"},
+                    ExpressionAttributeValues={
+                        ":sent": {"S": "SENT"}, ":timedout": {"S": "TIMED_OUT"},
+                    },
+                )
+            except self.dynamodb.exceptions.ConditionalCheckFailedException:
+                return {"status": "UNCHANGED"}
+            done = self._ensure_dialogue_escalated(case_id, message_id, "supplier did not reply")
+            return {"status": "ESCALATED" if done else "UNCHANGED"}
+        try:
+            self.dynamodb.update_item(
+                TableName=self._dialogue, Key=key,
+                UpdateExpression="SET reminderSent = :yes",
+                ConditionExpression="#s = :sent AND reminderSent = :no",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":sent": {"S": "SENT"}, ":no": {"BOOL": False},
+                    ":yes": {"BOOL": True},
+                },
+            )
+        except self.dynamodb.exceptions.ConditionalCheckFailedException:
+            return {"status": "UNCHANGED"}
+        try:
+            facts = load_facts(
+                self.cases, self.sap, case_id, expected_status=CaseStatus.WAITING_SUPPLIER
+            )
+            question = render_question(
+                facts, str(record["poNumber"]), Template(str(record["templateId"])),
+                str(record["referenceToken"]),
+            )
+            standin = self.standins().get(question.recipient)
+            if not standin or question.rendered_text != record["renderedText"]:
+                return {"status": "BLOCKED"}
+            self.ses.send_email(
+                Source=self.sender(), Destination={"ToAddresses": [standin]},
+                Message={
+                    "Subject": {"Data": f"{case_id}: PO {question.po_number} clarification"},
+                    "Body": {"Text": {"Data": question.rendered_text}},
+                },
+            )
+        except (KeyError, ValueError):
+            return {"status": "BLOCKED"}
+        except Exception:  # noqa: BLE001 - claim prevents duplicate reminder on ambiguous failure
+            return {"status": "BLOCKED"}
+        self.audit.record(
+            f"CASE#{case_id}", "SUPPLIER_REMINDER_SENT", actor="system", case_id=case_id,
+            payload={"messageId": message_id, "recipient": question.recipient},
+        )
+        return {"status": "REMINDED"}
 
     def _block_dialogue(self, key: dict[str, Any], reason: str) -> None:
         self.dynamodb.update_item(
@@ -183,6 +310,44 @@ class Notifier:
                 ":reason": {"S": reason},
             },
         )
+        case_id = str(key["PK"]["S"]).removeprefix("CASE#")
+        message_id = str(key["SK"]["S"]).removeprefix("MSG#")
+        self._ensure_dialogue_escalated(case_id, message_id, reason)
+
+    def _ensure_dialogue_escalated(self, case_id: str, message_id: str, reason: str) -> bool:
+        case = self.cases.get(case_id)
+        if case is None:
+            return False
+        try:
+            if case.status is CaseStatus.WAITING_SUPPLIER:
+                self.cases.transition(
+                    case_id, CaseStatus.INVESTIGATING, actor="system", reason=reason,
+                    expected=CaseStatus.WAITING_SUPPLIER,
+                )
+                case = self.cases.get(case_id)
+            if case is not None and case.status is CaseStatus.INVESTIGATING:
+                self.dynamodb.update_item(
+                    TableName=self._cases,
+                    Key={"PK": {"S": f"CASE#{case_id}"}, "SK": {"S": "META"}},
+                    UpdateExpression="SET tier = :three",
+                    ExpressionAttributeValues={":three": {"N": "3"}},
+                )
+                self.cases.transition(
+                    case_id, CaseStatus.ESCALATED, actor="system", reason=reason,
+                    expected=CaseStatus.INVESTIGATING,
+                )
+                case = self.cases.get(case_id)
+        except ConcurrentUpdateError:
+            return False
+        if case is None or case.status is not CaseStatus.ESCALATED:
+            return False
+        self.dynamodb.update_item(
+            TableName=self._dialogue,
+            Key={"PK": {"S": f"CASE#{case_id}"}, "SK": {"S": f"MSG#{message_id}"}},
+            UpdateExpression="SET escalationDone = :yes",
+            ExpressionAttributeValues={":yes": {"BOOL": True}},
+        )
+        return True
 
     # Allowlist (BR-03) ------------------------------------------------------------------
 
@@ -357,9 +522,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             sender=sender,
         )
     data = dict((event.get("detail") or {}).get("data") or {})
-    outcomes = (
-        _notifier.handle_dialogue(data)
-        if (event.get("detail-type") or "") == "SupplierInfoRequested"
-        else _notifier.handle(data)
-    )
+    if event.get("task") == "dialogueSweep":
+        outcomes = _notifier.sweep_dialogue()
+    elif (event.get("detail-type") or "") == "SupplierInfoRequested":
+        outcomes = _notifier.handle_dialogue(data)
+    else:
+        outcomes = _notifier.handle(data)
     return {"outcomes": outcomes}

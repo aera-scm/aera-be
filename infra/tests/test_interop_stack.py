@@ -14,6 +14,7 @@ def test_fr_int_agentcore_runtimes_require_scoped_oauth_client() -> None:
     assembly = app.synth()
     interop = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-interop")))
     identity = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-identity")))
+    edge = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-edge")))
     runtimes = interop.find_resources("AWS::BedrockAgentCore::Runtime")
     assert len(runtimes) == 2
     assert {row["Properties"]["ProtocolConfiguration"] for row in runtimes.values()} == {
@@ -32,20 +33,41 @@ def test_fr_int_agentcore_runtimes_require_scoped_oauth_client() -> None:
             "AERA_ENV",
             "AERA_INTEROP_PROTOCOL",
             "AERA_INTEROP_CLIENT_ID",
-            "AERA_INTEROP_API_FUNCTION",
+            "AERA_INTEROP_API_URL",
+            "AERA_INTEROP_PROVIDER",
+            "AERA_INTEROP_WORKLOAD",
+            "AERA_INTEROP_SCOPE",
         }
+        assert "/interop" in json.dumps(variables["AERA_INTEROP_API_URL"])
         assert "AERA_SAP_WRITES" not in variables
     clients = identity.find_resources("AWS::Cognito::UserPoolClient")
-    [machine] = [
+    machine = [
         value["Properties"]
         for value in clients.values()
         if value["Properties"]["AllowedOAuthFlows"] == ["client_credentials"]
     ]
-    assert machine["GenerateSecret"] is True
-    assert machine["AllowedOAuthScopes"] == ["aera-dev-interop/invoke"]
+    assert len(machine) == 2
+    assert all(row["GenerateSecret"] is True for row in machine)
+    assert all(row["AllowedOAuthScopes"] == ["aera-dev-interop/invoke"] for row in machine)
+    identity.resource_count_is("AWS::BedrockAgentCore::OAuth2CredentialProvider", 1)
+    provider = next(
+        iter(identity.find_resources("AWS::BedrockAgentCore::OAuth2CredentialProvider").values())
+    )
+    secret = provider["Properties"]["Oauth2ProviderConfigInput"]["CustomOauth2ProviderConfig"][
+        "ClientSecret"
+    ]
+    assert "Fn::GetAtt" in secret
+    interop.resource_count_is("AWS::BedrockAgentCore::WorkloadIdentity", 2)
+    scoped = [
+        row["Properties"]
+        for row in edge.find_resources("AWS::ApiGateway::Method").values()
+        if row["Properties"].get("AuthorizationScopes") == ["aera-dev-interop/invoke"]
+    ]
+    assert len(scoped) == 1 and scoped[0]["HttpMethod"] == "POST"
     policies = json.dumps(interop.find_resources("AWS::IAM::Policy"))
-    assert "lambda:InvokeFunction" in policies
-    for forbidden in ("states:", "ses:", "dynamodb:", "secretsmanager:", "s3:"):
+    assert "lambda:InvokeFunction" not in policies
+    assert "bedrock-agentcore:GetResourceOauth2Token" in policies
+    for forbidden in ("states:", "ses:", "dynamodb:", "s3:"):
         assert forbidden not in policies
     assets = json.loads((Path(assembly.directory) / "aera-dev-interop.assets.json").read_text())
     images = [

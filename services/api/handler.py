@@ -128,6 +128,7 @@ class Api:
     admin: Admin | None = None
     sap: Any = None  # SAP reads for projections and what-if (FR-SIM)
     lab: Lab | None = None
+    interop_service_client_id: str = ""
 
     def __post_init__(self) -> None:
         self.chat = Chat(self.dynamodb, self.bus, scan=self.scan, clock=self.clock, env=self.env)
@@ -142,8 +143,8 @@ class Api:
 
     def handle(self, event: dict[str, Any]) -> dict[str, Any]:
         try:
-            if isinstance(event.get("serviceContext"), dict):
-                return self._service_request(event)
+            if event.get("resource") == "/interop" and event.get("httpMethod") == "POST":
+                return self._service_http(event)
             user = _user(event)
             method = str(event.get("httpMethod"))
             resource = str(event.get("resource") or "")
@@ -172,8 +173,30 @@ class Api:
         except Problem as problem:
             return problem.response
 
+    def _service_http(self, event: dict[str, Any]) -> dict[str, Any]:
+        claims = ((event.get("requestContext") or {}).get("authorizer") or {}).get("claims") or {}
+        if (
+            not self.interop_service_client_id
+            or claims.get("client_id") != self.interop_service_client_id
+            or claims.get("token_use") != "access"
+        ):
+            raise Problem(403, "Interop service identity required")
+        if len(http.body_bytes(event)) > 64 * 1024:
+            raise Problem(413, "Interop request too large")
+        request = _json_body(event)
+        client_id = request.get("externalClientId")
+        if not isinstance(client_id, str):
+            raise Problem(400, "externalClientId required")
+        return self._service_request(
+            {
+                "serviceContext": {"clientId": client_id},
+                "operation": request.get("operation"),
+                "payload": request.get("payload"),
+            }
+        )
+
     def _service_request(self, event: dict[str, Any]) -> dict[str, Any]:
-        """Only the interop Runtime role can invoke this Lambda directly in deployed IAM."""
+        """Closed operations reached through the scoped interop service boundary."""
         context = event["serviceContext"]
         operation = str(event.get("operation") or "")
         client_id = str(context.get("clientId") or "")
@@ -870,6 +893,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             )
             if lab_endpoint
             else None,
+            interop_service_client_id=os.environ.get("AERA_INTEROP_SERVICE_CLIENT_ID", ""),
         )
     return _api.handle(event)
 

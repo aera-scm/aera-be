@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-import boto3
+import httpx
+from bedrock_agentcore.services.identity import IdentityClient
 
 from services.interop.protocol import a2a, card, client_from_bearer, mcp
 
@@ -15,23 +17,31 @@ MAX_BODY = 64 * 1024
 
 
 def invoke_api(client_id: str, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
-    name = os.environ["AERA_INTEROP_API_FUNCTION"]
+    identity = IdentityClient(os.environ["AWS_REGION"])
+    workload = identity.get_workload_access_token(os.environ["AERA_INTEROP_WORKLOAD"])
+    wat = workload.get("workloadAccessToken")
+    if not isinstance(wat, str) or not wat:
+        raise RuntimeError("AgentCore service identity unavailable")
+    access_token = asyncio.run(
+        identity.get_token(
+            provider_name=os.environ["AERA_INTEROP_PROVIDER"],
+            scopes=[os.environ["AERA_INTEROP_SCOPE"]],
+            agent_identity_token=wat,
+            auth_flow="M2M",
+        )
+    )
     request = {
-        "serviceContext": {"clientId": client_id},
+        "externalClientId": client_id,
         "operation": operation,
         "payload": payload,
     }
-    response = boto3.client("lambda").invoke(
-        FunctionName=name,
-        InvocationType="RequestResponse",
-        Payload=json.dumps(request).encode(),
+    response = httpx.post(
+        os.environ["AERA_INTEROP_API_URL"],
+        json=request,
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=15.0,
     )
-    if response.get("FunctionError"):
-        raise RuntimeError("service API failed")
-    result = json.loads(response["Payload"].read())
-    if not isinstance(result, dict) or "statusCode" not in result:
-        raise RuntimeError("service API returned an invalid response")
-    return result
+    return {"statusCode": response.status_code, "body": response.text}
 
 
 class Handler(BaseHTTPRequestHandler):

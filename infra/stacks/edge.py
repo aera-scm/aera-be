@@ -58,6 +58,8 @@ class EdgeStack(Stack):
         env_name: str,
         data: DataStack,
         pool_arn: str,
+        interop_service_client_id: str,
+        interop_scope: str,
         code: lambda_.Code,
         console_origins: list[str] | None = None,
         inbound_recipients: list[str] | None = None,
@@ -103,6 +105,7 @@ class EdgeStack(Stack):
                 "AERA_EXECUTION_STATE_MACHINE_ARN": execution_arn,
                 "AERA_LAB_DELIVERY": lab_delivery,
                 "AERA_WHATSAPP_MEDIA": whatsapp_media,
+                "AERA_INTEROP_SERVICE_CLIENT_ID": interop_service_client_id,
             },
             secrets=(
                 ("sap/mirror-oauth-client", "channels/whatsapp", "channels/carrier-webhook")
@@ -162,6 +165,7 @@ class EdgeStack(Stack):
             cognito_user_pools=[cognito.UserPool.from_user_pool_arn(self, "Pool", pool_arn)],
         )
         console = apigw.LambdaIntegration(api_fn)
+        self.api_url = rest.url
 
         def signed(resource: apigw.IResource, method: str) -> None:
             resource.add_method(
@@ -197,6 +201,13 @@ class EdgeStack(Stack):
         signals = rest.root.add_resource("signals")
         signed(signals, "GET")
         signed(signals, "POST")
+        rest.root.add_resource("interop").add_method(
+            "POST",
+            console,
+            authorizer=authorizer,
+            authorization_type=apigw.AuthorizationType.COGNITO,
+            authorization_scopes=[interop_scope],
+        )
         signed(rest.root.add_resource("metrics"), "GET")
         lab_runs = rest.root.add_resource("lab").add_resource("runs")
         signed(lab_runs, "GET")

@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from aws_cdk import CfnOutput, Fn, RemovalPolicy, Stack
+from aws_cdk import CfnOutput, Fn, RemovalPolicy, SecretValue, Stack
+from aws_cdk import aws_bedrockagentcore as agentcore
 from aws_cdk import aws_cognito as cognito
 from constructs import Construct
 
@@ -86,6 +87,20 @@ class IdentityStack(Stack):
         )
         machine_client.add_dependency(resource_server)
         self.interop_client_id = machine_client.ref
+        service_client = cognito.CfnUserPoolClient(
+            self,
+            "InteropServiceClient",
+            user_pool_id=pool.ref,
+            client_name=f"aera-{env_name}-interop-service",
+            generate_secret=True,
+            allowed_o_auth_flows=["client_credentials"],
+            allowed_o_auth_flows_user_pool_client=True,
+            allowed_o_auth_scopes=[self.interop_scope],
+            prevent_user_existence_errors="ENABLED",
+            enable_token_revocation=True,
+        )
+        service_client.add_dependency(resource_server)
+        self.interop_service_client_id = service_client.ref
         self.interop_discovery_url = Fn.join(
             "",
             [
@@ -93,6 +108,14 @@ class IdentityStack(Stack):
                 pool.ref,
                 "/.well-known/openid-configuration",
             ],
+        )
+        self.interop_provider = agentcore.OAuth2CredentialProvider.using_custom(
+            self,
+            "InteropProvider",
+            o_auth2_credential_provider_name=f"aera_{env_name}_interop_service",
+            client_id=service_client.ref,
+            client_secret=SecretValue.resource_attribute(service_client.attr_client_secret),
+            discovery_url=self.interop_discovery_url,
         )
         cognito.CfnUserPoolDomain(
             self,

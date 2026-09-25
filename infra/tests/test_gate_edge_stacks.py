@@ -168,6 +168,7 @@ def test_nfr_sec_04_console_routes_need_cognito_webhooks_need_signatures(
         ("POST", "/cases/{id}/fields/{fieldId}/confirm"): "COGNITO_USER_POOLS",
         ("GET", "/signals"): "COGNITO_USER_POOLS",
         ("POST", "/signals"): "COGNITO_USER_POOLS",
+        ("POST", "/interop"): "COGNITO_USER_POOLS",
         ("GET", "/metrics"): "COGNITO_USER_POOLS",
         ("GET", "/lab/runs"): "COGNITO_USER_POOLS",
         ("POST", "/lab/runs"): "COGNITO_USER_POOLS",

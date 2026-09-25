@@ -19,9 +19,14 @@ def event(
     operation: str, payload: dict[str, Any] | None = None, client_id: str = "external-agent-1"
 ) -> dict[str, Any]:
     return {
-        "serviceContext": {"clientId": client_id},
-        "operation": operation,
-        "payload": payload or {},
+        "httpMethod": "POST",
+        "resource": "/interop",
+        "requestContext": {
+            "authorizer": {"claims": {"client_id": "internal-service", "token_use": "access"}}
+        },
+        "body": json.dumps(
+            {"externalClientId": client_id, "operation": operation, "payload": payload or {}}
+        ),
     }
 
 
@@ -39,7 +44,13 @@ def test_br_21_at_26_agent_signal_passes_gate_but_approval_is_refused(
 ) -> None:
     raw = RawStore(s3, RAW_BUCKET)
     intake = Intake(dynamodb=dynamodb, raw=raw, bus=bus, component="api", env="test")
-    api = Api(dynamodb=dynamodb, intake=intake, bus=bus, env="test")
+    api = Api(
+        dynamodb=dynamodb,
+        intake=intake,
+        bus=bus,
+        env="test",
+        interop_service_client_id="internal-service",
+    )
     denied = api.handle(event("approve_plan", {"caseId": "EXC-2026-0914"}))
     accepted = api.handle(
         event(
@@ -110,3 +121,49 @@ def test_br_21_per_client_rate_limit_and_closed_operation_set(dynamodb: Any) -> 
         rate_limit(dynamodb, "test", "client-a", now=120, limit=2)
     rate_limit(dynamodb, "test", "client-b", now=120, limit=2)
     rate_limit(dynamodb, "test", "client-a", now=180, limit=2)
+
+
+def test_fr_int_03_service_http_requires_distinct_oauth_client(
+    dynamodb: Any, s3: Any, bus: RecordingBus
+) -> None:
+    intake = Intake(
+        dynamodb=dynamodb, raw=RawStore(s3, RAW_BUCKET), bus=bus, component="api", env="test"
+    )
+    api = Api(
+        dynamodb=dynamodb,
+        intake=intake,
+        bus=bus,
+        env="test",
+        interop_service_client_id="internal-service",
+    )
+    request: dict[str, Any] = {
+        "httpMethod": "POST",
+        "resource": "/interop",
+        "requestContext": {
+            "authorizer": {"claims": {"client_id": "external-agent-1", "token_use": "access"}}
+        },
+        "body": json.dumps(
+            {
+                "externalClientId": "external-agent-1",
+                "operation": "submit_exception_signal",
+                "payload": {"messageId": "m-1", "text": "PO 4500001234 late"},
+            }
+        ),
+    }
+    assert api.handle(request)["statusCode"] == 403
+    request["requestContext"]["authorizer"]["claims"]["client_id"] = "internal-service"
+    assert api.handle(request)["statusCode"] == 202
+    assert (
+        api.handle(
+            {
+                "serviceContext": {"clientId": "external-agent-1"},
+                "operation": "submit_exception_signal",
+                "payload": {"messageId": "m-2", "text": "PO 4500001234 late"},
+            }
+        )["statusCode"]
+        == 401
+    )
+    request["body"] = json.dumps(
+        {"externalClientId": "external-agent-1", "operation": "approve_plan", "payload": {}}
+    )
+    assert api.handle(request)["statusCode"] == 403

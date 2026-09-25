@@ -6,7 +6,6 @@ from aws_cdk import CfnOutput, IgnoreMode, Stack
 from aws_cdk import aws_bedrockagentcore as agentcore
 from aws_cdk import aws_ecr_assets as ecr_assets
 from aws_cdk import aws_iam as iam
-from aws_cdk import aws_lambda as lambda_
 from constructs import Construct
 
 from infra.constructs.service_function import ROOT
@@ -20,7 +19,8 @@ class InteropStack(Stack):
         construct_id: str,
         *,
         env_name: str,
-        api_function: lambda_.IFunction,
+        api_url: str,
+        credential_provider: agentcore.OAuth2CredentialProvider,
         discovery_url: str,
         client_id: str,
         oauth_scope: str,
@@ -64,7 +64,13 @@ class InteropStack(Stack):
                 ),
             )
             image.repository.grant_pull(role)
-            api_function.grant_invoke(role)
+            workload = agentcore.WorkloadIdentity(
+                self,
+                f"{protocol}Workload",
+                workload_identity_name=f"aera_{env_name}_{protocol.lower()}_service",
+            )
+            workload.grant_use(role)
+            credential_provider.grant_use(role)
             role.add_to_policy(
                 iam.PolicyStatement(
                     actions=[
@@ -108,7 +114,10 @@ class InteropStack(Stack):
                     "AERA_ENV": env_name,
                     "AERA_INTEROP_PROTOCOL": protocol,
                     "AERA_INTEROP_CLIENT_ID": client_id,
-                    "AERA_INTEROP_API_FUNCTION": api_function.function_name,
+                    "AERA_INTEROP_API_URL": f"{api_url.rstrip('/')}/interop",
+                    "AERA_INTEROP_PROVIDER": credential_provider.o_auth2_credential_provider_name,
+                    "AERA_INTEROP_WORKLOAD": workload.workload_identity_name,
+                    "AERA_INTEROP_SCOPE": oauth_scope,
                     **({"AERA_AGENT_CARD_URL": agent_card_url} if agent_card_url else {}),
                 },
             )

@@ -130,6 +130,8 @@ def build_app(settings: DataSettings) -> App:
             f"aera-{env_name}-edge",
             data=data,
             pool_arn=identity.pool_arn,
+            interop_service_client_id=identity.interop_service_client_id,
+            interop_scope=identity.interop_scope,
             code=service_code(settings.lambda_bundle),
             console_origins=list(settings.console_origins),
             inbound_recipients=list(settings.inbound_recipients),
@@ -167,7 +169,8 @@ def build_app(settings: DataSettings) -> App:
     stacks["interop"] = InteropStack(
         app,
         f"aera-{env_name}-interop",
-        api_function=edge.functions["api"],
+        api_url=edge.api_url,
+        credential_provider=identity.interop_provider,
         discovery_url=identity.interop_discovery_url,
         client_id=identity.interop_client_id,
         oauth_scope=identity.interop_scope,

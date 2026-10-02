@@ -86,6 +86,9 @@ def test_nfr_sec_05_tls_timeout_header_and_no_redirects() -> None:
     class Response:
         status = 200
 
+        def getheader(self, name: str, default: str = "") -> str:
+            return default
+
         def read(self, size: int) -> bytes:
             return b"{}"
 
@@ -114,6 +117,7 @@ def test_nfr_sec_05_tls_timeout_header_and_no_redirects() -> None:
         {
             "APIKey": "synthetic-test-value",  # pragma: allowlist secret
             "Accept": "application/json",
+            "Accept-Encoding": "gzip, identity",
         },
     )
     assert calls[-1] == "closed"
@@ -146,3 +150,85 @@ def test_ir_01_sandbox_urls_use_the_gateway_odata_path() -> None:
     )
     assert "/s4hanacloud/sap/opu/odata/sap/API_BUSINESS_PARTNER/$metadata" in PATHS
     assert all(path.startswith("/s4hanacloud/sap/opu/odata/sap/") for path in PATHS)
+
+
+def encoded_connection(body: bytes, encoding: str | None, calls: list[Any] | None = None) -> Any:
+    class Response:
+        status = 200
+
+        def getheader(self, name: str, default: str = "") -> str:
+            assert name == "Content-Encoding"
+            return default if encoding is None else encoding
+
+        def read(self, size: int) -> bytes:
+            return body[:size]
+
+    class Connection:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def request(self, method: str, path: str, *, headers: dict[str, str]) -> None:
+            if calls is not None:
+                calls.append(headers)
+
+        def getresponse(self) -> Response:
+            return Response()
+
+        def close(self) -> None:
+            pass
+
+    return Connection
+
+
+def fetch_encoded(body: bytes, encoding: str | None) -> bytes:
+    return get(
+        smoke.PATH,
+        "synthetic-test-value",
+        "application/json",
+        connection=encoded_connection(body, encoding),
+    )
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "GZIP", " gzip "])
+def test_ir_01_gzip_encoded_response_is_decoded(encoding: str) -> None:
+    import gzip
+
+    assert fetch_encoded(gzip.compress(FIXTURE.read_bytes()), encoding) == FIXTURE.read_bytes()
+
+
+@pytest.mark.parametrize("encoding", [None, "", "identity"])
+def test_ir_01_plain_response_is_returned_unchanged(encoding: str | None) -> None:
+    assert fetch_encoded(b'{"d":1}', encoding) == b'{"d":1}'
+
+
+@pytest.mark.parametrize("encoding", ["br", "deflate", "zstd", "gzip, br"])
+def test_ir_01_unsupported_content_encoding_is_refused(encoding: str) -> None:
+    with pytest.raises(SapError, match="unsupported content encoding"):
+        fetch_encoded(b"\x00\x01", encoding)
+
+
+def test_nfr_sec_05_decoded_response_is_size_bounded() -> None:
+    import gzip
+
+    from sap_transport import MAX_BYTES
+
+    with pytest.raises(SapError, match="size limit"):
+        fetch_encoded(gzip.compress(b"0" * (MAX_BYTES + 1)), "gzip")
+
+
+@pytest.mark.parametrize("cut", [10, 40])
+def test_ir_01_corrupt_or_truncated_gzip_is_sanitized(cut: int) -> None:
+    import gzip
+
+    body = gzip.compress(FIXTURE.read_bytes() * 20)
+    with pytest.raises(SapError, match="could not be decoded"):
+        fetch_encoded(body[:cut] if cut == 40 else b"not-gzip-data", "gzip")
+
+
+def test_ir_01_request_offers_only_encodings_it_can_decode() -> None:
+    calls: list[Any] = []
+    connection = encoded_connection(b"{}", None, calls)
+
+    get(smoke.PATH, "synthetic-test-value", "application/json", connection=connection)
+
+    assert calls[0]["Accept-Encoding"] == "gzip, identity"

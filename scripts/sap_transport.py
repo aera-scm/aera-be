@@ -2,6 +2,7 @@
 
 import http.client
 import ssl
+import zlib
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -19,6 +20,8 @@ APIS = (
 PO_PATH = f"{BASE}/{APIS[0]}/A_PurchaseOrder?$top=5"
 PATHS = frozenset([PO_PATH, *(f"{BASE}/{api}/$metadata" for api in APIS)])
 MAX_BYTES = 16 * 1024 * 1024
+# The sandbox compresses successful responses; offer only what `_decoded` can undo.
+ENCODINGS = "gzip, identity"
 Fetch = Callable[[str, str, str], bytes]
 
 
@@ -35,6 +38,25 @@ def environment_key(environ: Mapping[str, str]) -> str:
     return key
 
 
+def _decoded(body: bytes, encoding: str) -> bytes:
+    """Undo the sandbox's gzip transfer coding, with the same size bound as plain bodies."""
+    encoding = encoding.strip().lower()
+    if encoding in ("", "identity"):
+        return body
+    if encoding != "gzip":
+        raise SapError("SAP response uses an unsupported content encoding.")
+    try:
+        decoder = zlib.decompressobj(wbits=zlib.MAX_WBITS | 16)
+        decoded = decoder.decompress(body, MAX_BYTES + 1)
+    except zlib.error:
+        raise SapError("SAP response could not be decoded.") from None
+    if len(decoded) > MAX_BYTES or decoder.unconsumed_tail:
+        raise SapError("SAP response exceeds the size limit.")
+    if not decoder.eof:
+        raise SapError("SAP response could not be decoded.")
+    return decoded
+
+
 def get(
     path: str,
     key: str,
@@ -49,7 +71,8 @@ def get(
     client = None
     try:
         client = connection(HOST, timeout=20, context=context)
-        client.request("GET", path, headers={"APIKey": key, "Accept": accept})
+        headers = {"APIKey": key, "Accept": accept, "Accept-Encoding": ENCODINGS}
+        client.request("GET", path, headers=headers)
         response = client.getresponse()
         # No redirects: never forward the credential to another location.
         if response.status != 200:
@@ -57,7 +80,7 @@ def get(
         body: bytes = response.read(MAX_BYTES + 1)
         if len(body) > MAX_BYTES:
             raise SapError("SAP response exceeds the size limit.")
-        return body
+        return _decoded(body, response.getheader("Content-Encoding", ""))
     except (OSError, http.client.HTTPException, ValueError):
         raise SapError("SAP transport failed (network, timeout or TLS).") from None
     finally:

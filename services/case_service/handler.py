@@ -20,8 +20,9 @@ from decimal import Decimal
 from typing import Any
 
 from services.rules.br_15 import WINDOW, same_case
+from services.shared.audit import AuditWriter, TransactionConflictError
 from services.shared.case_state import TERMINAL
-from services.shared.cases import CaseStore
+from services.shared.cases import CaseStore, ConcurrentUpdateError
 from services.shared.dynamo import table_name, to_item
 from services.shared.models import Case, CaseStatus, CaseType, Signal, SignalChannel
 from services.shared.runtime import emit
@@ -68,7 +69,8 @@ class CaseService:
             )
             existing = self._open_case(_material_key(subject.material, subject.plant))
             if existing is not None:
-                self._touch(existing, reason="mrp")
+                if not self._finish_open(existing):
+                    self._touch(existing, reason="mrp")
                 continue
             case = self._open(subject, "MRP_EXCEPTION", days_late=_days_late(message))
             opened.append(case.case_id)
@@ -88,8 +90,17 @@ class CaseService:
 
     def on_signal(self, signal_id: str) -> str | None:
         signal = self.signals.get(signal_id)
-        if signal is None or signal.case_id is not None or not signal.sender_verified:
-            return None if signal is None else signal.case_id
+        if signal is None or not signal.sender_verified:
+            return None
+        if signal.case_id is not None:
+            case = self.cases.get(signal.case_id)
+            if case is None or self._record(case.case_id, f"SIGNAL#{signal_id}"):
+                return signal.case_id
+            self._attach(case, signal)
+            if not self._finish_open(case):
+                self._touch(case, reason="signal", signal_id=signal_id)
+            self._signal_done(case.case_id, signal_id)
+            return case.case_id
         if not signal.po_number:
             return None  # nothing to key a case on; the console lists it as unassigned
         subject = self._subject_for_po(signal.po_number, signal.material)
@@ -100,7 +111,9 @@ class CaseService:
             case = self._open(subject, _signal_case_type(signal), first_signal=signal)
         else:
             self._attach(case, signal)
-            self._touch(case, reason="signal", signal_id=signal_id)
+            if not self._finish_open(case):
+                self._touch(case, reason="signal", signal_id=signal_id)
+        self._signal_done(case.case_id, signal_id)
         return case.case_id
 
     def _case_for_signal(self, signal: Signal, subject: Subject) -> Case | None:
@@ -135,34 +148,97 @@ class CaseService:
         first_signal: Signal | None = None,
         days_late: Decimal | None = None,
     ) -> Case:
-        now = self.clock()
-        case = Case(
-            case_id=self.cases.next_case_id(now.year),
-            type=case_type,
-            material=subject.material,
-            material_description=subject.description,
-            plant=subject.plant,
-            po_number=subject.po_number,
-            po_item=subject.po_item,
-            status=CaseStatus.RECEIVED,
-            days_late=days_late,
-            created_at=now,
-            updated_at=now,
-        )
-        self.cases.create(case, actor="system")
-        self._put_key(_material_key(case.material, case.plant), case.case_id)
-        if case.po_number:
-            self._put_key(_po_key(case.po_number, case.material), case.case_id)
-        if first_signal is not None:
-            self._attach(case, first_signal)
-        triage = self._triage(case)
-        self.cases.transition(
-            case.case_id, CaseStatus.TRIAGED, actor="system", expected=CaseStatus.RECEIVED
-        )
+        for _ in range(5):
+            now = self.clock()
+            case = Case(
+                case_id=self.cases.next_case_id(now.year),
+                type=case_type,
+                material=subject.material,
+                material_description=subject.description,
+                plant=subject.plant,
+                po_number=subject.po_number,
+                po_item=subject.po_item,
+                status=CaseStatus.RECEIVED,
+                days_late=days_late,
+                created_at=now,
+                updated_at=now,
+            )
+            keys = [self._put_key(_material_key(case.material, case.plant), case.case_id)]
+            if case.po_number:
+                keys.append(self._put_key(_po_key(case.po_number, case.material), case.case_id))
+            existing = (
+                self._case_for_signal(first_signal, subject)
+                if first_signal is not None
+                else self._open_case(_material_key(case.material, case.plant))
+            )
+            if existing is not None:
+                if first_signal is not None:
+                    self._attach(existing, first_signal)
+                if not self._finish_open(existing):
+                    self._touch(
+                        existing,
+                        reason="signal" if first_signal else "mrp",
+                        signal_id=first_signal.signal_id if first_signal else None,
+                    )
+                return existing
+            record = case.model_dump(mode="python", by_alias=True, exclude={"stage"})
+            try:
+                AuditWriter(self.dynamodb, self.env).record(
+                    f"CASE#{case.case_id}",
+                    "CASE_CREATED",
+                    actor="system",
+                    case_id=case.case_id,
+                    payload={"status": case.status.value, "type": case.type},
+                    extra=[
+                        {
+                            "Put": {
+                                "TableName": self._table,
+                                "Item": to_item(
+                                    {
+                                        "PK": f"CASE#{case.case_id}",
+                                        "SK": "META",
+                                        **record,
+                                        "stage": case.stage,
+                                    }
+                                ),
+                                "ConditionExpression": "attribute_not_exists(PK)",
+                            }
+                        },
+                        {
+                            "Put": {
+                                "TableName": self._table,
+                                "Item": to_item({"PK": f"CASE#{case.case_id}", "SK": "OPENING"}),
+                            }
+                        },
+                        *keys,
+                    ],
+                )
+            except TransactionConflictError:
+                continue
+            if first_signal is not None:
+                self._attach(case, first_signal)
+            self._finish_open(case)
+            return case
+        raise RuntimeError("case lookup changed repeatedly while opening")
+
+    def _finish_open(self, case: Case) -> bool:
+        if not self._record(case.case_id, "OPENING") and case.status is not CaseStatus.RECEIVED:
+            return False
+        if case.status is CaseStatus.RECEIVED:
+            self._triage(case)
+            try:
+                self.cases.transition(
+                    case.case_id, CaseStatus.TRIAGED, actor="system", expected=CaseStatus.RECEIVED
+                )
+            except ConcurrentUpdateError:
+                pass  # another delivery completed triage
+        current = self.cases.get(case.case_id)
+        if current is None or current.status is CaseStatus.RECEIVED:
+            raise RuntimeError("case did not finish triage")
         emit(
             self.bus,
             "CaseOpened",
-            self._summary(case, triage, CaseStatus.TRIAGED),
+            self._summary(current, current, current.status),
             component=COMPONENT,
             case_id=case.case_id,
             environment=self.env,
@@ -175,7 +251,24 @@ class CaseService:
             case_id=case.case_id,
             environment=self.env,
         )
-        return case
+        self.dynamodb.delete_item(
+            TableName=self._table,
+            Key={"PK": {"S": f"CASE#{case.case_id}"}, "SK": {"S": "OPENING"}},
+        )
+        return True
+
+    def _record(self, case_id: str, sk: str) -> dict[str, Any]:
+        return dict(
+            self.dynamodb.get_item(
+                TableName=self._table,
+                Key={"PK": {"S": f"CASE#{case_id}"}, "SK": {"S": sk}},
+                ConsistentRead=True,
+            ).get("Item")
+            or {}
+        )
+
+    def _signal_done(self, case_id: str, signal_id: str) -> None:
+        self._put({"PK": f"CASE#{case_id}", "SK": f"SIGNAL#{signal_id}"})
 
     def _touch(self, case: Case, *, reason: str, signal_id: str | None = None) -> None:
         triage = self._triage(case)
@@ -223,7 +316,7 @@ class CaseService:
         return triage
 
     @staticmethod
-    def _summary(case: Case, triage: Triage, status: CaseStatus) -> dict[str, Any]:
+    def _summary(case: Case, triage: Triage | Case, status: CaseStatus) -> dict[str, Any]:
         return {
             "caseId": case.case_id,
             "status": status.value,
@@ -280,8 +373,20 @@ class CaseService:
             return None
         return case
 
-    def _put_key(self, key: str, case_id: str) -> None:
-        self._put({"PK": key, "SK": "OPEN", "caseId": case_id})
+    def _put_key(self, key: str, case_id: str) -> dict[str, Any]:
+        previous = self.dynamodb.get_item(
+            TableName=self._table,
+            Key={"PK": {"S": key}, "SK": {"S": "OPEN"}},
+            ConsistentRead=True,
+        ).get("Item")
+        put: dict[str, Any] = {
+            "TableName": self._table,
+            "Item": to_item({"PK": key, "SK": "OPEN", "caseId": case_id}),
+            "ConditionExpression": "caseId = :previous" if previous else "attribute_not_exists(PK)",
+        }
+        if previous:
+            put["ExpressionAttributeValues"] = {":previous": previous["caseId"]}
+        return {"Put": put}
 
     def _put(self, item: dict[str, Any]) -> None:
         self.dynamodb.put_item(TableName=self._table, Item=to_item(item))

@@ -1,6 +1,7 @@
 """Intake, signal store and partner master data (FR-ING-03, FR-ING-09, DR-02, BR-04)."""
 
 import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -121,3 +122,25 @@ def test_contact_directory_caches_for_five_minutes(sap: SapClient) -> None:
     assert directory.contacts() is first
     now[0] = 301.0
     assert directory.contacts() is not first
+
+
+def test_concurrent_intake_returns_winner_without_overwriting_progress(
+    intake: Intake, dynamodb: Any, bus: RecordingBus
+) -> None:
+    winners = []
+
+    def overlap(params: dict[str, Any], **kwargs: Any) -> None:
+        request = json.loads(params["body"])
+        if request["TableName"] != "aera-test-signals":
+            return
+        dynamodb.meta.events.unregister("before-call.dynamodb.PutItem", overlap)
+        winner = intake.receive(inbound())
+        progressed = winner.model_copy(update={"status": SignalStatus.ACCEPTED})
+        SignalStore(dynamodb, ENV).save(progressed)
+        winners.append(progressed)
+
+    dynamodb.meta.events.register("before-call.dynamodb.PutItem", overlap)
+    result = intake.receive(inbound())
+    assert result == winners[0]
+    assert SignalStore(dynamodb, ENV).get(result.signal_id) == result
+    assert bus.types() == ["SignalReceived"]

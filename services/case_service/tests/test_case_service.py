@@ -173,3 +173,145 @@ def test_redelivered_signal_event_is_harmless(
     signal = accepted_signal(dynamodb, s3, bus, po="4500001234", received=T0, key="a")
     assert service.on_signal(signal) == service.on_signal(signal) == "EXC-2026-0914"
     assert bus.types().count("CaseOpened") == 1
+
+
+@pytest.mark.parametrize("event_type", ["CaseOpened", "CaseReadyForRun"])
+def test_signal_retry_recovers_failed_open_event(
+    service: CaseService, dynamodb: Any, s3: Any, bus: RecordingBus, event_type: str
+) -> None:
+    signal_id = accepted_signal(dynamodb, s3, bus, po="4500001234", received=T0, key="retry")
+
+    def reject(request: dict[str, Any]) -> None:
+        if request["Entries"][0]["DetailType"] == event_type:
+            raise ConnectionError("event transport interrupted")
+
+    class InterruptedBus(RecordingBus):
+        def put_events(self, Entries: list[dict[str, Any]]) -> dict[str, Any]:
+            reject({"Entries": Entries})
+            return super().put_events(Entries)
+
+    service.bus = InterruptedBus()
+    with pytest.raises(ConnectionError):
+        service.on_signal(signal_id)
+    service.bus = bus
+    case_id = service.on_signal(signal_id)
+    assert case_id == "EXC-2026-0914"
+    assert bus.types().count("CaseReadyForRun") == 1
+    stored = service.cases.get(case_id)
+    assert stored is not None and stored.status is CaseStatus.TRIAGED
+    assert stored.figures and all(figure.source_ref.startswith("SAP:") for figure in stored.figures)
+
+
+def test_concurrent_signal_open_has_one_case_and_no_orphan(
+    service: CaseService, dynamodb: Any, s3: Any, bus: RecordingBus
+) -> None:
+    first = accepted_signal(dynamodb, s3, bus, po="4500001234", received=T0, key="first")
+    second = accepted_signal(dynamodb, s3, bus, po="4500001234", received=T0, key="second")
+    winner: list[str | None] = []
+
+    def overlap(**kwargs: Any) -> None:
+        dynamodb.meta.events.unregister("before-call.dynamodb.TransactWriteItems", overlap)
+        winner.append(service.on_signal(second))
+
+    dynamodb.meta.events.register("before-call.dynamodb.TransactWriteItems", overlap)
+    assert service.on_signal(first) == winner[0]
+    items = dynamodb.scan(TableName="aera-test-cases")["Items"]
+    cases = [
+        item for item in items if item["PK"]["S"].startswith("CASE#") and item["SK"]["S"] == "META"
+    ]
+    assert len(cases) == 1
+    stored = service.cases.get(str(winner[0]))
+    assert stored is not None and set(stored.signal_ids) == {first, second}
+    assert bus.types().count("CaseOpened") == 1
+
+
+def test_mrp_retry_recovers_received_case(
+    service: CaseService, sap: SapClient, bus: RecordingBus, dynamodb: Any
+) -> None:
+    data = poll(sap, bus)
+    data["messages"] = data["messages"][:1]
+
+    def interrupt(**kwargs: Any) -> None:
+        dynamodb.meta.events.unregister("before-call.dynamodb.UpdateItem", interrupt)
+        raise ConnectionError("triage write interrupted")
+
+    def after_creation(**kwargs: Any) -> None:
+        dynamodb.meta.events.unregister("after-call.dynamodb.TransactWriteItems", after_creation)
+        dynamodb.meta.events.register("before-call.dynamodb.UpdateItem", interrupt)
+
+    dynamodb.meta.events.register("after-call.dynamodb.TransactWriteItems", after_creation)
+    with pytest.raises(ConnectionError):
+        service.on_mrp(data)
+    service.on_mrp(data)
+    stored = service.cases.get("EXC-2026-0914")
+    assert stored is not None and stored.status is CaseStatus.TRIAGED
+    assert bus.types().count("CaseReadyForRun") == 1
+
+
+@pytest.mark.parametrize("event_type", ["CaseUpdated", "CaseReadyForRun"])
+def test_assigned_signal_retry_recovers_failed_update_event(
+    service: CaseService, dynamodb: Any, s3: Any, bus: RecordingBus, event_type: str
+) -> None:
+    first = accepted_signal(dynamodb, s3, bus, po="4500001234", received=T0, key="open")
+    service.on_signal(first)
+    second = accepted_signal(dynamodb, s3, bus, po="4500001234", received=T0, key="update")
+
+    class InterruptedBus(RecordingBus):
+        def put_events(self, Entries: list[dict[str, Any]]) -> dict[str, Any]:
+            if Entries[0]["DetailType"] == event_type:
+                raise ConnectionError("event transport interrupted")
+            return super().put_events(Entries)
+
+    service.bus = InterruptedBus()
+    with pytest.raises(ConnectionError):
+        service.on_signal(second)
+    service.bus = bus
+    before = len(bus.details("CaseReadyForRun"))
+    assert service.on_signal(second) == "EXC-2026-0914"
+    assert len(bus.details("CaseReadyForRun")) == before + 1
+    assert service.on_signal(second) == "EXC-2026-0914"
+    assert len(bus.details("CaseReadyForRun")) == before + 1
+    stored = service.cases.get("EXC-2026-0914")
+    assert stored is not None and stored.signal_ids == [first, second]
+
+
+def test_concurrent_mrp_open_has_one_case(
+    service: CaseService, dynamodb: Any, sap: SapClient, bus: RecordingBus
+) -> None:
+    data = poll(sap, bus)
+    data["messages"] = data["messages"][:1]
+
+    def overlap(**kwargs: Any) -> None:
+        dynamodb.meta.events.unregister("before-call.dynamodb.TransactWriteItems", overlap)
+        service.on_mrp(data)
+
+    dynamodb.meta.events.register("before-call.dynamodb.TransactWriteItems", overlap)
+    service.on_mrp(data)
+    items = dynamodb.scan(TableName="aera-test-cases")["Items"]
+    assert len([item for item in items if item["SK"]["S"] == "META"]) == 1
+    assert bus.types().count("CaseOpened") == 1
+
+
+def test_br_15_exact_72_hours_joins_existing_case(
+    service: CaseService, dynamodb: Any, s3: Any, bus: RecordingBus
+) -> None:
+    first = accepted_signal(dynamodb, s3, bus, po="4500001234", received=T0, key="boundary-open")
+    later = accepted_signal(
+        dynamodb, s3, bus, po="4500001234", received=T0 + timedelta(hours=72), key="boundary-join"
+    )
+    assert service.on_signal(first) == service.on_signal(later)
+    assert bus.types().count("CaseOpened") == 1
+
+
+def test_closed_lookup_can_be_replaced_without_duplicate_open_case(
+    service: CaseService, dynamodb: Any, s3: Any, bus: RecordingBus
+) -> None:
+    first = accepted_signal(dynamodb, s3, bus, po="4500001234", received=T0, key="closed-open")
+    case_id = service.on_signal(first)
+    assert case_id is not None
+    for status in (CaseStatus.INVESTIGATING, CaseStatus.ESCALATED, CaseStatus.CLOSED):
+        service.cases.transition(case_id, status, actor="system")
+    second = accepted_signal(dynamodb, s3, bus, po="4500001234", received=T0, key="closed-new")
+    assert service.on_signal(second) == "EXC-2026-0915"
+    assert service.on_signal(second) == "EXC-2026-0915"
+    assert bus.types().count("CaseOpened") == 2

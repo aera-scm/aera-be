@@ -64,10 +64,15 @@ class Intake:
     def receive(self, inbound: Inbound) -> Signal:
         signal_id = self._claim(inbound) if inbound.dedup_key else new_ulid()
         existing = self._signals.get(signal_id)
-        if existing is not None and existing.status is not SignalStatus.RECEIVED:
-            return existing
         if existing is None:
-            existing = self._store(signal_id, inbound)
+            try:
+                existing = self._store(signal_id, inbound)
+            except self._dynamodb.exceptions.ConditionalCheckFailedException:
+                existing = self._signals.get(signal_id)
+                if existing is None:
+                    raise
+        if existing.status is not SignalStatus.RECEIVED:
+            return existing
         emit(
             self._bus,
             "SignalReceived",

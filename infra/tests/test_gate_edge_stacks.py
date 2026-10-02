@@ -227,3 +227,23 @@ def test_no_secret_values_in_gate_or_edge(stacks: dict[str, assertions.Template]
         text = json.dumps(template.to_json())
         assert "SecretString" not in text
         assert "synthetic" not in text.lower()
+
+
+def test_nfr_sec_04_proxy_and_gateway_errors_allow_configured_console(
+    stacks: dict[str, assertions.Template],
+) -> None:
+    edge = stacks["edge"]
+    api = functions(edge)["aera-dev-api"]
+    assert api["Environment"]["Variables"]["AERA_CONSOLE_ORIGINS"] == "http://localhost:5173"
+    responses = edge.find_resources("AWS::ApiGateway::GatewayResponse")
+    assert {r["Properties"]["ResponseType"] for r in responses.values()} == {
+        "DEFAULT_4XX",
+        "DEFAULT_5XX",
+    }
+    for row in responses.values():
+        assert (
+            row["Properties"]["ResponseParameters"][
+                "gatewayresponse.header.Access-Control-Allow-Origin"
+            ]
+            == "'http://localhost:5173'"
+        )

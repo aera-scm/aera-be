@@ -57,3 +57,37 @@ def test_hosted_ui_domain_does_not_publish_the_account_id(template: assertions.T
     assert "AWS::AccountId" not in text
     assert "AWS::StackId" in text
     assert domain["Fn::Join"][1][0] == "aera-dev-"
+
+
+def test_nfr_sec_04_hosted_console_origin_is_shared_by_cognito_and_cors() -> None:
+    app = build_app(
+        DataSettings(
+            env_name="dev",
+            owner="synthetic-owner",
+            console_origins=("https://console.example.invalid",),
+        )
+    )
+    identity = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-identity")))
+    identity.has_resource_properties(
+        "AWS::Cognito::UserPoolClient",
+        {
+            "GenerateSecret": False,
+            "CallbackURLs": ["https://console.example.invalid/callback"],
+            "LogoutURLs": ["https://console.example.invalid/"],
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://console.example.invalid",
+        "https://console.example.invalid/callback",
+        "https://user@console.example.invalid",
+        "https://console.example.invalid?token=x",
+        "*",
+    ],
+)
+def test_nfr_sec_04_refuses_unsafe_console_origins(origin: str) -> None:
+    with pytest.raises(ValueError, match="console origin"):
+        build_app(DataSettings(env_name="dev", owner="synthetic-owner", console_origins=(origin,)))

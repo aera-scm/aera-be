@@ -89,6 +89,7 @@ class EdgeStack(Stack):
             data.bus.grant_put_events_to(service.function)
             return service.function
 
+        origins = console_origins or ["http://localhost:5173"]
         environment = {"AERA_RAW_BUCKET": raw.bucket_name}
         # Named, not referenced: the edge stack must not depend on the control stack (6.16).
         execution_arn = self.format_arn(
@@ -106,6 +107,7 @@ class EdgeStack(Stack):
                 "AERA_LAB_DELIVERY": lab_delivery,
                 "AERA_WHATSAPP_MEDIA": whatsapp_media,
                 "AERA_INTEROP_SERVICE_CLIENT_ID": interop_service_client_id,
+                "AERA_CONSOLE_ORIGINS": ",".join(origins),
             },
             secrets=(
                 ("sap/mirror-oauth-client", "channels/whatsapp", "channels/carrier-webhook")
@@ -141,7 +143,6 @@ class EdgeStack(Stack):
         tables["connections"].grant_read_write_data(realtime)
 
         # REST API ---------------------------------------------------------------------------
-        origins = console_origins or ["http://localhost:5173"]
         rest = apigw.RestApi(
             self,
             "Api",
@@ -159,6 +160,15 @@ class EdgeStack(Stack):
                 allow_methods=["GET", "POST", "PUT", "OPTIONS"],
             ),
         )
+        for name, response_type in (
+            ("ClientErrors", apigw.ResponseType.DEFAULT_4_XX),
+            ("ServerErrors", apigw.ResponseType.DEFAULT_5_XX),
+        ):
+            rest.add_gateway_response(
+                name,
+                type=response_type,
+                response_headers={"Access-Control-Allow-Origin": f"'{origins[0]}'"},
+            )
         authorizer = apigw.CognitoUserPoolsAuthorizer(
             self,
             "ConsoleAuthorizer",

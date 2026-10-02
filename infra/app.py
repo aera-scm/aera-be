@@ -16,7 +16,7 @@ from aws_cdk import App, DefaultStackSynthesizer, Environment, Stack, Tags
 
 from infra.constructs.github_oidc import GitHubOidc
 from infra.constructs.service_function import service_code
-from infra.environments import APPROVED_REGION, require_deployable_environment
+from infra.environments import APPROVED_REGION, console_origins, require_deployable_environment
 from infra.stacks.control import ControlStack
 from infra.stacks.data import DataStack
 from infra.stacks.edge import EdgeStack
@@ -82,6 +82,7 @@ def data_settings_from_environment(environ: Mapping[str, str]) -> DataSettings:
 
 def build_app(settings: DataSettings) -> App:
     env_name = require_deployable_environment(settings.env_name)
+    origins = console_origins(settings.console_origins)
     app = App(analytics_reporting=False)
     if settings.github_repository and not all(
         (settings.cdk_qualifier, settings.github_provider_mode, settings.budget_name)
@@ -121,7 +122,7 @@ def build_app(settings: DataSettings) -> App:
         "synthesizer": DefaultStackSynthesizer(qualifier=settings.cdk_qualifier),
     }
 
-    identity = IdentityStack(app, f"aera-{env_name}-identity", **common)
+    identity = IdentityStack(app, f"aera-{env_name}-identity", console_origins=origins, **common)
     stacks: dict[str, Stack] = {
         "data": data,
         "identity": identity,
@@ -133,7 +134,7 @@ def build_app(settings: DataSettings) -> App:
             interop_service_client_id=identity.interop_service_client_id,
             interop_scope=identity.interop_scope,
             code=service_code(settings.lambda_bundle),
-            console_origins=list(settings.console_origins),
+            console_origins=list(origins),
             inbound_recipients=list(settings.inbound_recipients),
             whatsapp_media=settings.whatsapp_media,
             lab_delivery=settings.lab_delivery,

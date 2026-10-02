@@ -563,3 +563,24 @@ def test_rollback_needs_an_approver_and_a_reopened_case(api: Api, dynamodb: Any)
 
     assert api.handle(planner)["statusCode"] == 403
     assert api.handle(approver)["statusCode"] == 409
+
+
+@pytest.mark.parametrize(
+    "origin,allowed",
+    [
+        ("https://console.example.invalid", True),
+        ("https://untrusted.example.invalid", False),
+    ],
+)
+def test_nfr_sec_04_console_proxy_responses_have_scoped_cors(
+    api: Api, monkeypatch: pytest.MonkeyPatch, origin: str, allowed: bool
+) -> None:
+    monkeypatch.setenv("AERA_CONSOLE_ORIGINS", "https://console.example.invalid")
+    for event in (
+        request("GET", "/cases", headers={"Origin": origin}),
+        request("GET", "/admin/settings", groups="planner", headers={"origin": origin}),
+    ):
+        result = api.handle(event)
+        assert result["statusCode"] in {200, 403}
+        assert (result["headers"].get("Access-Control-Allow-Origin") == origin) is allowed
+        assert result["headers"].get("Vary") == "Origin"

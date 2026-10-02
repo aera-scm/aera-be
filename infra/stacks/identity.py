@@ -12,7 +12,13 @@ from infra.environments import require_deployable_environment
 
 class IdentityStack(Stack):
     def __init__(
-        self, scope: Construct, construct_id: str, *, env_name: str, **kwargs: Any
+        self,
+        scope: Construct,
+        construct_id: str,
+        *,
+        env_name: str,
+        console_origins: tuple[str, ...] = ("http://localhost:5173",),
+        **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
         require_deployable_environment(env_name)
@@ -54,8 +60,8 @@ class IdentityStack(Stack):
             allowed_o_auth_flows_user_pool_client=True,
             allowed_o_auth_scopes=["openid", "email", "profile"],
             supported_identity_providers=["COGNITO"],
-            callback_ur_ls=["http://localhost:5173/callback"],
-            logout_ur_ls=["http://localhost:5173/"],
+            callback_ur_ls=[f"{origin}/callback" for origin in console_origins],
+            logout_ur_ls=[f"{origin}/" for origin in console_origins],
             prevent_user_existence_errors="ENABLED",
             enable_token_revocation=True,
             explicit_auth_flows=["ALLOW_REFRESH_TOKEN_AUTH"],

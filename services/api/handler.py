@@ -142,6 +142,16 @@ class Api:
         self._idempotency = table_name("idempotency", self.env)
 
     def handle(self, event: dict[str, Any]) -> dict[str, Any]:
+        response = self._handle(event)
+        headers = response.setdefault("headers", {})
+        headers["Vary"] = "Origin"
+        origin = http.header(event, "Origin")
+        allowed = os.environ.get("AERA_CONSOLE_ORIGINS", "http://localhost:5173").split(",")
+        if origin and origin in {value.strip() for value in allowed}:
+            headers["Access-Control-Allow-Origin"] = origin
+        return response
+
+    def _handle(self, event: dict[str, Any]) -> dict[str, Any]:
         try:
             if event.get("resource") == "/interop" and event.get("httpMethod") == "POST":
                 return self._service_http(event)

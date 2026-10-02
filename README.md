@@ -137,6 +137,10 @@ lines. Without Make, run `uv run --locked python scripts/check_region.py` or
   `/aera/{env}/sap/mirror-oauth-client`.
 
 Every resource is tagged `project`, `env`, `component` and `owner`; set `AERA_OWNER_TAG`.
+The case service reserves one concurrent execution. Lambda refuses any reservation while
+the account's concurrency limit is at its floor of 10; set
+`AERA_CASE_SERVICE_RESERVED_CONCURRENCY=0` to deploy without it until the limit is raised.
+Case opening stays transactional either way.
 Approved `MODEL_SUPERVISOR_ID` / `MODEL_SMALL_ID` are written to SSM when set, after the
 same validation as `check-models`. To use an existing approved secret instead of a new
 container, set `AERA_SAP_SANDBOX_SECRET_NAME` or `AERA_SAP_MIRROR_SECRET_NAME`.

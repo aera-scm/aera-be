@@ -35,6 +35,7 @@ class GateStack(Stack):
         env_name: str,
         data: DataStack,
         code: lambda_.Code,
+        case_service_reserved: bool = True,
         **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -98,8 +99,12 @@ class GateStack(Stack):
 
         gatekeeper = function("gatekeeper")
         extraction = function("extraction", timeout=Duration.seconds(60), memory_mb=1024)
+        # One at a time on top of the transactional case opening. Lambda refuses any
+        # reservation while the account limit is at its floor of 10, so it can be left out.
         case_service = function(
-            "case-service", timeout=Duration.seconds(60), reserved_concurrency=1
+            "case-service",
+            timeout=Duration.seconds(60),
+            reserved_concurrency=1 if case_service_reserved else None,
         )
         mrp_poller = function("mrp-poller", timeout=Duration.seconds(60))
 

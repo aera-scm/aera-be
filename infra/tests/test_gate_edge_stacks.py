@@ -270,3 +270,39 @@ def test_api_function_has_one_api_wide_invoke_permission(
     assert grants[0]["Action"] == "lambda:InvokeFunction"
     source = json.dumps(grants[0]["SourceArn"])
     assert "execute-api" in source and source.rstrip('"]}').endswith("/*/*/*")
+
+
+def test_case_service_reservation_can_be_left_out_for_a_low_account_limit() -> None:
+    """An account limited to 10 concurrent executions cannot reserve any (ADR-0025)."""
+    app = build_app(
+        DataSettings(env_name="dev", owner="aera-test-owner", case_service_reserved=False)
+    )
+    gate = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-gate")))
+
+    assert "ReservedConcurrentExecutions" not in functions(gate)["aera-dev-case-service"]
+
+
+@pytest.mark.parametrize(("value", "expected"), [(None, True), ("1", True), ("0", False)])
+def test_case_service_reservation_is_read_from_the_environment(
+    value: str | None, expected: bool
+) -> None:
+    from infra.app import data_settings_from_environment
+
+    environ = {"AERA_ENV": "dev", "AERA_OWNER_TAG": "aera-test-owner"}
+    if value is not None:
+        environ["AERA_CASE_SERVICE_RESERVED_CONCURRENCY"] = value
+
+    assert data_settings_from_environment(environ).case_service_reserved is expected
+
+
+@pytest.mark.parametrize("value", ["2", "true", "-1", "off"])
+def test_case_service_reservation_refuses_other_values(value: str) -> None:
+    from infra.app import data_settings_from_environment
+
+    environ = {
+        "AERA_ENV": "dev",
+        "AERA_OWNER_TAG": "aera-test-owner",
+        "AERA_CASE_SERVICE_RESERVED_CONCURRENCY": value,
+    }
+    with pytest.raises(ValueError, match="AERA_CASE_SERVICE_RESERVED_CONCURRENCY"):
+        data_settings_from_environment(environ)

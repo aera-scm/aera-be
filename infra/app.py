@@ -46,6 +46,16 @@ class DataSettings:
     whatsapp_media: str = "graph"
     agent_card_url: str | None = None
     lab_delivery: str = "internal-replay"
+    # False only where the account's concurrency limit leaves nothing to reserve.
+    case_service_reserved: bool = True
+
+
+def _case_service_reserved(environ: Mapping[str, str]) -> bool:
+    name = "AERA_CASE_SERVICE_RESERVED_CONCURRENCY"
+    value = environ.get(name, "").strip() or "1"
+    if value not in {"0", "1"}:
+        raise ValueError(f"{name} must be 1 (reserve one execution) or 0 (reserve none)")
+    return value == "1"
 
 
 def _optional(environ: Mapping[str, str], name: str) -> str | None:
@@ -77,6 +87,7 @@ def data_settings_from_environment(environ: Mapping[str, str]) -> DataSettings:
         whatsapp_media=_optional(environ, "AERA_WHATSAPP_MEDIA") or "graph",
         agent_card_url=_optional(environ, "AERA_AGENT_CARD_URL"),
         lab_delivery=_optional(environ, "AERA_LAB_DELIVERY") or "internal-replay",
+        case_service_reserved=_case_service_reserved(environ),
     )
 
 
@@ -145,6 +156,7 @@ def build_app(settings: DataSettings) -> App:
             f"aera-{env_name}-gate",
             data=data,
             code=service_code(settings.lambda_bundle),
+            case_service_reserved=settings.case_service_reserved,
             **common,
         ),
     }

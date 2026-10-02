@@ -51,6 +51,7 @@ from services.shared.models import (
     new_ulid,
 )
 from services.shared.runtime import emit
+from services.shared.sap_client import Target
 from services.shared.signals import SignalStore
 from services.shared.trace import TraceStore
 from services.tools.context import ToolContext
@@ -895,7 +896,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             component=COMPONENT,
         )
         sap = runtime.sap_client()
-        lab_endpoint = sap.write
+        lab_endpoint = sap.read if sap.read.target is Target.MIRROR else None
         auth = lab_endpoint.auth if lab_endpoint else None
         delivery_mode = os.environ.get("AERA_LAB_DELIVERY", "internal-replay")
         if delivery_mode not in {"internal-replay", "channel-replay"}:

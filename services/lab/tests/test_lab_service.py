@@ -146,3 +146,43 @@ def test_fr_lab_01_selected_plant_uses_matching_po_in_signal(
     signal = SignalStore(dynamodb, "test").get(row["signalIds"][0])
     assert row["poNumber"] == "4502001240"
     assert signal is not None and signal.po_number == row["poNumber"]
+
+
+def test_fr_lab_02_lambda_startup_configures_lab_without_sap_write_access(
+    aws: None, dynamodb: Any, s3: Any, mirror_url: str, monkeypatch: Any
+) -> None:
+    import boto3
+
+    from services.api import handler
+    from services.shared import runtime
+
+    monkeypatch.setenv("AERA_RAW_BUCKET", RAW_BUCKET)
+    monkeypatch.setattr(handler, "_api", None)
+    runtime.client.cache_clear()
+    runtime.parameter.cache_clear()
+    runtime.secret.cache_clear()
+    runtime.sap_client.cache_clear()
+    try:
+        boto3.client("ssm").put_parameter(
+            Name="/aera/test/SAP_READ_BASE", Value=mirror_url, Type="String"
+        )
+        boto3.client("secretsmanager").create_secret(
+            Name="/aera/test/sap/mirror-oauth-client",
+            SecretString=json.dumps(
+                {
+                    "tokenUrl": "https://identity.example.invalid/oauth/token",
+                    "clientId": "synthetic-client",
+                    "clientSecret": "synthetic-client-secret",  # pragma: allowlist secret
+                }
+            ),
+        )
+        response = handler.lambda_handler(request("GET", "/lab/runs", "admin"), None)
+        assert response["statusCode"] == 200
+        assert json.loads(response["body"]) == []
+        assert runtime.sap_client().write is None
+        assert handler._api is not None and handler._api.lab is not None
+    finally:
+        runtime.client.cache_clear()
+        runtime.parameter.cache_clear()
+        runtime.secret.cache_clear()
+        runtime.sap_client.cache_clear()

@@ -86,6 +86,40 @@ def stub_model(
     )
 
 
+def profile_details(profile_id: str, **overrides: Any) -> dict[str, Any]:
+    base = profile_id.split(".", 1)[1]
+    details: dict[str, Any] = {
+        "inferenceProfileName": "US synthetic profile",
+        "inferenceProfileArn": (
+            f"arn:aws:bedrock:{REGION}:123456789012:inference-profile/{profile_id}"
+        ),
+        "inferenceProfileId": profile_id,
+        "models": [
+            {"modelArn": f"arn:aws:bedrock:{region}::foundation-model/{base}"}
+            for region in ("us-east-1", "us-east-2", "us-west-2")
+        ],
+        "status": "ACTIVE",
+        "type": "SYSTEM_DEFINED",
+    }
+    details.update(overrides)
+    return details
+
+
+def stub_profile(
+    stubber: Stubber, profile_id: str, *, details: dict[str, Any] | None = None
+) -> None:
+    """Stub the profile lookup, then the base model it routes to."""
+    base = profile_id.split(".", 1)[1]
+    stubber.add_response(
+        "get_inference_profile",
+        details or profile_details(profile_id),
+        {"inferenceProfileIdentifier": profile_id},
+    )
+    stub_model(
+        stubber, base, details=model_details(base, inferenceTypesSupported=["INFERENCE_PROFILE"])
+    )
+
+
 def converse_response(output_tokens: int = 2) -> dict[str, Any]:
     return {
         "output": {"message": {"role": "assistant", "content": [{"text": "OK"}]}},

@@ -86,7 +86,31 @@ def test_a_01_small_claude_model_is_accepted_as_small_model() -> None:
     assert model_id_problems(SUPERVISOR_MODEL_ID, "anthropic.claude-haiku-4-5-20251001-v1:0") == []
 
 
-@pytest.mark.parametrize("prefix", ["us", "eu", "apac", "global", "us-gov", "jp", "au", "ca"])
+@pytest.mark.parametrize(
+    "supervisor", [f"us.{SUPERVISOR_MODEL_ID}", "us.anthropic.claude-sonnet-4-6"]
+)
+def test_a_01_us_inference_profile_is_accepted_for_the_claude_supervisor(supervisor: str) -> None:
+    assert model_id_problems(supervisor, SMALL_MODEL_ID) == []
+
+
+@pytest.mark.parametrize("small", [f"us.{SMALL_MODEL_ID}", "us.anthropic.claude-haiku-4-5"])
+def test_a_01_us_inference_profile_is_rejected_for_the_small_model(small: str) -> None:
+    problems = model_id_problems(SUPERVISOR_MODEL_ID, small)
+
+    assert len(problems) == 1
+    assert "MODEL_SMALL_ID" in problems[0]
+    assert "inference profile" in problems[0]
+
+
+def test_a_01_us_inference_profile_of_another_family_is_rejected_for_supervisor() -> None:
+    problems = model_id_problems("us.amazon.nova-pro-v1:0", SMALL_MODEL_ID)
+
+    assert len(problems) == 1
+    assert "MODEL_SUPERVISOR_ID" in problems[0]
+    assert "Anthropic Claude" in problems[0]
+
+
+@pytest.mark.parametrize("prefix", ["eu", "apac", "global", "us-gov", "jp", "au", "ca"])
 def test_a_01_geographic_or_global_inference_profile_is_rejected(prefix: str) -> None:
     problems = model_id_problems(f"{prefix}.{SUPERVISOR_MODEL_ID}", SMALL_MODEL_ID)
 
@@ -183,7 +207,7 @@ def test_check_model_access_rejects_profile_before_contacting_aws(
     code = model_main(
         [
             "--supervisor-model-id",
-            f"us.{SUPERVISOR_MODEL_ID}",
+            f"global.{SUPERVISOR_MODEL_ID}",
             "--small-model-id",
             SMALL_MODEL_ID,
             "--live",

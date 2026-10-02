@@ -94,11 +94,13 @@ from a tagged release, never from a development checkout.
 
 ## Region and model checks
 
-All data and processing stay in one region, `us-east-1` (NFR-CMP-02). Model access
-must use direct regional inference (A-01): `MODEL_SUPERVISOR_ID` is a bare Anthropic
-Claude model id and `MODEL_SMALL_ID` a bare Amazon Nova or Claude model id. Geographic
-and global inference profiles (`us.`, `eu.`, `apac.`, `global.`, ...) and ARNs are
-rejected, and every deployment command refuses any other region.
+All data stays in one region, `us-east-1` (NFR-CMP-02). `MODEL_SMALL_ID` is a bare
+Amazon Nova or Claude model id used by direct regional inference (A-01).
+`MODEL_SUPERVISOR_ID` is an Anthropic Claude model id: either a bare direct regional id
+or, as the one recorded residency exception (ADR-0023), the US geographic inference
+profile (`us.anthropic.claude-...`), whose inference may run in `us-east-1`, `us-east-2`
+or `us-west-2`. Every other profile (`eu.`, `apac.`, `global.`, ...), a US profile for the
+small model, and ARNs are rejected, and every deployment command refuses any other region.
 
 ```sh
 make check-region                       # offline: region configuration only
@@ -254,7 +256,8 @@ resources. Build the Lambda bundle separately before deployment as before.
 The console API emits CaseReadyForRun and returns the chosen run ID; only the
 run-starter invokes AgentCore. Neither runtime nor tool roles can invoke execution
 workflows or send notifications. Model IAM permits direct regional Claude/Nova
-models and explicitly denies inference outside us-east-1; no inference profiles.
+models in us-east-1 and the US Claude inference profile; us-east-2 and us-west-2 are
+reachable only through that profile, and inference in any other region is denied.
 
 Offline tests cover schemas, IAM, packaging, event wiring and scripted reference
 runs. They do not establish a successful image build, ECR publication, live model

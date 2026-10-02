@@ -20,8 +20,10 @@ from bedrock_stubs import (
     comprehend_client,
     converse_response,
     model_details,
+    profile_details,
     runtime_client,
     stub_model,
+    stub_profile,
     textract_client,
 )
 from botocore.stub import Stubber
@@ -233,6 +235,127 @@ def test_a_01_accessible_models_pass_the_account_check(
     assert f"Account check ({REGION}): {SUPERVISOR_MODEL_ID}: on demand, ACTIVE" in out
     assert f"Account check ({REGION}): {SMALL_MODEL_ID}: on demand, ACTIVE" in out
     assert "Invocation" not in out
+
+
+PROFILE_ID = f"us.{SUPERVISOR_MODEL_ID}"
+PROFILE_MODELS = ["--supervisor-model-id", PROFILE_ID, "--small-model-id", SMALL_MODEL_ID]
+
+
+def test_a_01_us_profile_supervisor_passes_the_account_check(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    clients = model_clients()
+    with stubbed(*vars(clients).values()) as (sts, budgets, bedrock, runtime):
+        budget_ok(sts, budgets)
+        stub_profile(bedrock, PROFILE_ID)
+        stub_model(bedrock, SMALL_MODEL_ID)
+
+        code = model_main([*PROFILE_MODELS, *LIVE], clients_factory=lambda p, r: clients)
+
+        bedrock.assert_no_pending_responses()
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert f"Account check ({REGION}): {PROFILE_ID}: US inference profile (us-east-1," in out
+    assert "us-east-1, us-east-2, us-west-2), ACTIVE, authorized" in out
+    assert f"Account check ({REGION}): {SMALL_MODEL_ID}: on demand, ACTIVE" in out
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"status": "DISABLED"}, "inference profile status is 'DISABLED', expected 'ACTIVE'"),
+        ({"type": "APPLICATION"}, "inference profile type is 'APPLICATION'"),
+        (
+            {
+                "models": [
+                    {
+                        "modelArn": "arn:aws:bedrock:ca-central-1::foundation-model/"
+                        + SUPERVISOR_MODEL_ID
+                    }
+                ]
+            },
+            "inference profile routes to 'ca-central-1'",
+        ),
+    ],
+)
+def test_a_01_unsuitable_us_profile_fails_the_account_check(
+    overrides: dict[str, Any], expected: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    clients = model_clients()
+    with stubbed(*vars(clients).values()) as (sts, budgets, bedrock, runtime):
+        budget_ok(sts, budgets)
+        stub_profile(bedrock, PROFILE_ID, details=profile_details(PROFILE_ID, **overrides))
+        stub_model(bedrock, SMALL_MODEL_ID)
+
+        code = model_main([*PROFILE_MODELS, *LIVE], clients_factory=lambda p, r: clients)
+
+    assert code == 1
+    assert f"{PROFILE_ID}: {expected}" in capsys.readouterr().err
+
+
+def test_a_01_profile_base_model_must_be_offered_through_a_profile(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    clients = model_clients()
+    with stubbed(*vars(clients).values()) as (sts, budgets, bedrock, runtime):
+        budget_ok(sts, budgets)
+        bedrock.add_response(
+            "get_inference_profile",
+            profile_details(PROFILE_ID),
+            {"inferenceProfileIdentifier": PROFILE_ID},
+        )
+        stub_model(
+            bedrock,
+            SUPERVISOR_MODEL_ID,
+            details=model_details(SUPERVISOR_MODEL_ID, inferenceTypesSupported=["PROVISIONED"]),
+        )
+        stub_model(bedrock, SMALL_MODEL_ID)
+
+        code = model_main([*PROFILE_MODELS, *LIVE], clients_factory=lambda p, r: clients)
+
+    assert code == 1
+    assert f"{PROFILE_ID}: not invocable through an inference profile" in capsys.readouterr().err
+
+
+def test_a_01_missing_us_profile_fails_the_account_check(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    clients = model_clients()
+    with stubbed(*vars(clients).values()) as (sts, budgets, bedrock, runtime):
+        budget_ok(sts, budgets)
+        bedrock.add_client_error(
+            "get_inference_profile",
+            service_error_code="ResourceNotFoundException",
+            expected_params={"inferenceProfileIdentifier": PROFILE_ID},
+        )
+        stub_model(bedrock, SMALL_MODEL_ID)
+
+        code = model_main([*PROFILE_MODELS, *LIVE], clients_factory=lambda p, r: clients)
+
+    assert code == 1
+    assert f"{PROFILE_ID}: inference profile not offered in us-east-1" in capsys.readouterr().err
+
+
+def test_a_01_invocation_uses_the_us_profile_id(capsys: pytest.CaptureFixture[str]) -> None:
+    clients = model_clients()
+    with stubbed(*vars(clients).values()) as (sts, budgets, bedrock, runtime):
+        budget_ok(sts, budgets)
+        stub_profile(bedrock, PROFILE_ID)
+        stub_model(bedrock, SMALL_MODEL_ID)
+        runtime.add_response("converse", converse_response(2), converse_params(PROFILE_ID))
+        runtime.add_response("converse", converse_response(1), converse_params(SMALL_MODEL_ID))
+
+        code = model_main(
+            [*PROFILE_MODELS, *LIVE, "--invoke"], clients_factory=lambda p, r: clients
+        )
+
+        runtime.assert_no_pending_responses()
+
+    assert code == 0
+    assert (
+        f"Invocation ({REGION}): {PROFILE_ID}: end_turn, 2 output tokens" in capsys.readouterr().out
+    )
 
 
 @pytest.mark.parametrize(

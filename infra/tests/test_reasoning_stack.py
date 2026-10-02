@@ -115,22 +115,47 @@ def test_srd_6_18_container_lifecycle_and_asset_allowlist(
     )
 
 
-def test_nfr_cmp_02_only_direct_regional_models_and_cross_region_deny(
+def test_nfr_cmp_02_models_stay_regional_except_the_us_supervisor_profile(
     deployment: tuple[dict[str, assertions.Template], Path],
 ) -> None:
+    """ADR-0023: the US profile is the only cross-region path, and only for Claude."""
     template = deployment[0]["reasoning"]
     policies = statements(template, role_id(template, "RuntimeRole"))
     inference = [item for item in policies if "bedrock:InvokeModel" in actions(item)]
-    assert len(inference) == 2
-    allowed = next(item for item in inference if item["Effect"] == "Allow")
-    resources = json.dumps(allowed["Resource"])
-    assert "foundation-model/anthropic.claude-" in resources
-    assert "foundation-model/amazon.nova-" in resources
-    assert "us-east-1" in resources
-    assert "inference-profile" not in resources
+    assert len(inference) == 3
+    allowed = [item for item in inference if item["Effect"] == "Allow"]
+
+    direct = next(item for item in allowed if "Condition" not in item)
+    resources = json.dumps(direct["Resource"])
+    assert "us-east-1::foundation-model/anthropic.claude-" in resources
+    assert "us-east-1::foundation-model/amazon.nova-" in resources
+    assert ":inference-profile/us.anthropic.claude-" in resources
+    assert "us-east-2" not in resources and "us-west-2" not in resources
+    assert "global." not in resources and "inference-profile/*" not in resources
+
+    routed = next(item for item in allowed if "Condition" in item)
+    destinations = json.dumps(routed["Resource"])
+    assert "us-east-2::foundation-model/anthropic.claude-" in destinations
+    assert "us-west-2::foundation-model/anthropic.claude-" in destinations
+    assert "amazon.nova-" not in destinations
+    assert list(routed["Condition"]) == ["StringLike"]
+    profile = json.dumps(routed["Condition"]["StringLike"]["bedrock:InferenceProfileArn"])
+    assert ":inference-profile/us.anthropic.claude-" in profile and "us-east-1" in profile
+
     denied = next(item for item in inference if item["Effect"] == "Deny")
     assert denied["Resource"] == "*"
-    assert denied["Condition"] == {"StringNotEquals": {"aws:RequestedRegion": "us-east-1"}}
+    assert denied["Condition"] == {
+        "StringNotEquals": {"aws:RequestedRegion": ["us-east-1", "us-east-2", "us-west-2"]}
+    }
+
+
+def test_adr_0023_profile_regions_match_the_deployment_check() -> None:
+    from check_model_access import US_PROFILE_REGIONS
+
+    from infra.stacks.reasoning import SUPERVISOR_PROFILE_REGIONS
+
+    assert set(SUPERVISOR_PROFILE_REGIONS) == set(US_PROFILE_REGIONS)
+    assert SUPERVISOR_PROFILE_REGIONS[0] == "us-east-1"
 
 
 def test_nfr_sec_01_no_execution_or_sap_write_privileges(

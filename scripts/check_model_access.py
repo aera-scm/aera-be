@@ -2,11 +2,14 @@
 
 Offline (default) it validates ``MODEL_SUPERVISOR_ID`` and ``MODEL_SMALL_ID``:
 bare, direct regional Bedrock model ids of the right family. Geographic and
-global inference profiles and ARNs are rejected. That is not account evidence.
+global inference profiles and ARNs are rejected, with one exception: the Claude
+supervisor may use the US geographic profile (ADR-0023). That is not account
+evidence.
 
 ``--live`` verifies the budget first (NFR-COST-01), then checks each model in the
 approved region: offered on demand, active, and authorised with provider
-agreement, entitlement and region availability. ``--invoke`` additionally sends
+agreement, entitlement and region availability. A US profile must be active,
+system-defined and route only to the approved US regions. ``--invoke`` additionally sends
 one tiny synthetic Converse request per model, bounded to a few output tokens.
 Account and invocation results are reported on separate, labelled lines.
 
@@ -22,7 +25,7 @@ import re
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -45,6 +48,10 @@ SMALL_VARIABLE = "MODEL_SMALL_ID"
 
 # Prefixes of geographic and global cross-region inference profiles (A-01).
 GEOGRAPHIC_PREFIXES = frozenset({"us", "us-gov", "eu", "apac", "jp", "au", "ca", "global"})
+# ADR-0023: the one permitted profile, for the Claude supervisor only, and the regions it
+# may route to. Mirrors infra.stacks.reasoning; a test keeps the two equal.
+US_PROFILE_PREFIX = "us"
+US_PROFILE_REGIONS = ("us-east-1", "us-east-2", "us-west-2")
 # SRD 6.23 / 6.24: Claude supervisor; Nova or smaller Claude for classification.
 MODEL_FAMILIES: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
     SUPERVISOR_VARIABLE: ("an Anthropic Claude model", (("anthropic", "claude-"),)),
@@ -72,15 +79,27 @@ def _model_id_problem(variable: str, model_id: str) -> str | None:
     match = _MODEL_ID.fullmatch(value)
     if match is None:
         return f"{variable} {value!r} is not a Bedrock model id"
-    if match["third"] is not None or match["first"] in GEOGRAPHIC_PREFIXES:
+    provider, model = match["first"], match["second"]
+    if variable == SUPERVISOR_VARIABLE and profile_base_model(value) is not None:
+        provider, model = match["second"], match["third"]
+    elif match["third"] is not None or match["first"] in GEOGRAPHIC_PREFIXES:
         return (
             f"{variable} {value!r} is a geographic or global inference profile; only direct "
-            "regional model ids are allowed (A-01, NFR-CMP-02)"
+            "regional model ids are allowed, or the US profile for the supervisor "
+            "(A-01, NFR-CMP-02, ADR-0023)"
         )
     family, allowed = MODEL_FAMILIES[variable]
-    if not any(match["first"] == p and match["second"].startswith(m) for p, m in allowed):
+    if not any(provider == p and model.startswith(m) for p, m in allowed):
         return f"{variable} {value!r} is not {family} (SRD 6.23)"
     return None
+
+
+def profile_base_model(model_id: str) -> str | None:
+    """Return the model behind a US inference profile id, or None for a direct id."""
+    match = _MODEL_ID.fullmatch(model_id)
+    if match is None or match["third"] is None or match["first"] != US_PROFILE_PREFIX:
+        return None
+    return model_id.split(".", 1)[1]
 
 
 def model_id_problems(supervisor: str, small: str) -> list[str]:
@@ -109,18 +128,56 @@ def open_model_clients(profile: str, region: str) -> ModelClients:
     )
 
 
-def check_model(bedrock: BedrockClient, model_id: str, region: str) -> tuple[str, list[str]]:
-    """Return the account-check line and any problems for one model."""
+class _ModelUnavailableError(Exception):
+    """A model or profile lookup failed; the message is the problem to report."""
+
+
+def _model_details(bedrock: BedrockClient, model_id: str, region: str) -> Any:
     try:
-        details = bedrock.get_foundation_model(modelIdentifier=model_id)["modelDetails"]
+        return bedrock.get_foundation_model(modelIdentifier=model_id)["modelDetails"]
     except (ClientError, BotoCoreError) as error:
         code = error_code(error)
         if code == "ResourceNotFoundException":
-            return "", [f"{model_id}: not offered in {region}"]
-        return "", [f"{model_id}: GetFoundationModel failed with {code}"]
+            raise _ModelUnavailableError(f"not offered in {region}") from None
+        raise _ModelUnavailableError(f"GetFoundationModel failed with {code}") from None
 
+
+def _profile_problems(bedrock: BedrockClient, profile_id: str, region: str) -> list[str]:
+    """ADR-0023: the profile must be AWS-defined, active and stay in the approved US regions."""
+    try:
+        profile = bedrock.get_inference_profile(inferenceProfileIdentifier=profile_id)
+    except (ClientError, BotoCoreError) as error:
+        code = error_code(error)
+        if code == "ResourceNotFoundException":
+            raise _ModelUnavailableError(f"inference profile not offered in {region}") from None
+        raise _ModelUnavailableError(f"GetInferenceProfile failed with {code}") from None
     problems = []
-    if "ON_DEMAND" not in details.get("inferenceTypesSupported", []):
+    if profile["status"] != "ACTIVE":
+        problems.append(f"inference profile status is {profile['status']!r}, expected 'ACTIVE'")
+    if profile["type"] != "SYSTEM_DEFINED":
+        problems.append(f"inference profile type is {profile['type']!r}, expected 'SYSTEM_DEFINED'")
+    routed = sorted({model["modelArn"].split(":")[3] for model in profile["models"]})
+    problems.extend(
+        f"inference profile routes to '{target}', outside {', '.join(US_PROFILE_REGIONS)}"
+        for target in routed
+        if target not in US_PROFILE_REGIONS
+    )
+    return problems
+
+
+def check_model(bedrock: BedrockClient, model_id: str, region: str) -> tuple[str, list[str]]:
+    """Return the account-check line and any problems for one model."""
+    base = profile_base_model(model_id)
+    try:
+        problems = [] if base is None else _profile_problems(bedrock, model_id, region)
+        details = _model_details(bedrock, base or model_id, region)
+    except _ModelUnavailableError as error:
+        return "", [f"{model_id}: {error}"]
+
+    if base is not None:
+        if "INFERENCE_PROFILE" not in details.get("inferenceTypesSupported", []):
+            problems.append("not invocable through an inference profile")
+    elif "ON_DEMAND" not in details.get("inferenceTypesSupported", []):
         problems.append("not invocable on demand by direct regional inference")
     status = details.get("modelLifecycle", {}).get("status")
     if status != "ACTIVE":
@@ -130,7 +187,7 @@ def check_model(bedrock: BedrockClient, model_id: str, region: str) -> tuple[str
         problems.append(f"resolved in '{arn_region}', not '{region}'")
 
     try:
-        access = bedrock.get_foundation_model_availability(modelId=model_id)
+        access = bedrock.get_foundation_model_availability(modelId=base or model_id)
     except (ClientError, BotoCoreError) as error:
         problems.append(f"GetFoundationModelAvailability failed with {error_code(error)}")
     else:
@@ -144,8 +201,11 @@ def check_model(bedrock: BedrockClient, model_id: str, region: str) -> tuple[str
             f"{label} is {actual!r}" for label, actual, wanted in expected if actual != wanted
         )
 
+    kind = (
+        "on demand" if base is None else f"US inference profile ({', '.join(US_PROFILE_REGIONS)})"
+    )
     line = (
-        f"Account check ({region}): {model_id}: on demand, ACTIVE, authorized; provider "
+        f"Account check ({region}): {model_id}: {kind}, ACTIVE, authorized; provider "
         "agreement, entitlement and region available"
     )
     return ("", [f"{model_id}: {problem}" for problem in problems]) if problems else (line, [])
@@ -193,7 +253,8 @@ def main(
         return 1
     print(
         f"Offline configuration: region {region}; supervisor {models[0]}; small {models[1]}; "
-        "direct regional model ids (not account evidence)."
+        "direct regional model ids, or the US profile for the supervisor "
+        "(not account evidence)."
     )
     if not args.live:
         return 0

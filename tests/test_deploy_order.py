@@ -219,7 +219,7 @@ def test_nfr_cmp_02_unapproved_region_is_refused_before_any_call(action: str) ->
     "models",
     [
         {
-            "MODEL_SUPERVISOR_ID": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "MODEL_SUPERVISOR_ID": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
             "MODEL_SMALL_ID": "amazon.nova-lite-v1:0",
         },
         {"MODEL_SUPERVISOR_ID": "anthropic.claude-sonnet-4-5-20250929-v1:0"},

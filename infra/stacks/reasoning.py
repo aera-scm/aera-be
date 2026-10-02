@@ -35,6 +35,10 @@ AGENT_PARAMETERS = (
     "GUARDRAIL_ID",
     "GUARDRAIL_VERSION",
 )
+# ADR-0023: the Claude supervisor may use the US inference profile, which routes to these
+# regions only. Mirrors scripts/check_model_access.py; a test keeps the two equal.
+SUPERVISOR_PROFILE = "us.anthropic.claude-*"
+SUPERVISOR_PROFILE_REGIONS = ("us-east-1", "us-east-2", "us-west-2")
 # What each tool may touch besides SAP reads.
 CASE_WRITERS = {"ask_planner", "request_supplier_info", "propose_plan", "escalate"}
 CALCULATORS = {"calc_impact", "calc_option"}
@@ -154,21 +158,45 @@ class ReasoningStack(Stack):
                 conditions={"StringEquals": {"aws:SourceAccount": self.account}},
             ),
         )
+        invoke = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+
+        def model_arn(region: str, family: str) -> str:
+            return f"arn:{self.partition}:bedrock:{region}::foundation-model/{family}"
+
+        supervisor_profile = (
+            f"arn:{self.partition}:bedrock:{self.region}:{self.account}"
+            f":inference-profile/{SUPERVISOR_PROFILE}"
+        )
         runtime_role.add_to_policy(
             iam.PolicyStatement(
-                actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+                actions=invoke,
                 resources=[
-                    f"arn:{self.partition}:bedrock:{self.region}::foundation-model/anthropic.claude-*",
-                    f"arn:{self.partition}:bedrock:{self.region}::foundation-model/amazon.nova-*",
+                    model_arn(self.region, "anthropic.claude-*"),
+                    model_arn(self.region, "amazon.nova-*"),
+                    supervisor_profile,
                 ],
+            )
+        )
+        # ADR-0023: the other US regions are reachable only as destinations of that profile.
+        runtime_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=invoke,
+                resources=[
+                    model_arn(region, "anthropic.claude-*")
+                    for region in SUPERVISOR_PROFILE_REGIONS
+                    if region != APPROVED_REGION
+                ],
+                conditions={"StringLike": {"bedrock:InferenceProfileArn": supervisor_profile}},
             )
         )
         runtime_role.add_to_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.DENY,
-                actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+                actions=invoke,
                 resources=["*"],
-                conditions={"StringNotEquals": {"aws:RequestedRegion": APPROVED_REGION}},
+                conditions={
+                    "StringNotEquals": {"aws:RequestedRegion": list(SUPERVISOR_PROFILE_REGIONS)}
+                },
             )
         )
         runtime_role.add_to_policy(

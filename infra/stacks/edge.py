@@ -174,7 +174,22 @@ class EdgeStack(Stack):
             "ConsoleAuthorizer",
             cognito_user_pools=[cognito.UserPool.from_user_pool_arn(self, "Pool", pool_arn)],
         )
-        console = apigw.LambdaIntegration(api_fn)
+        # One invoke permission for the whole API. LambdaIntegration adds two statements per
+        # method, which takes the function's resource policy past Lambda's 20 KB limit.
+        console = apigw.LambdaIntegration(
+            lambda_.Function.from_function_attributes(
+                self,
+                "ApiTarget",
+                function_arn=api_fn.function_arn,
+                same_environment=False,
+                skip_permissions=True,
+            )
+        )
+        api_fn.add_permission(
+            "ApiInvoke",
+            principal=iam.ServicePrincipal("apigateway.amazonaws.com"),
+            source_arn=rest.arn_for_execute_api(),
+        )
         self.api_url = rest.url
 
         def signed(resource: apigw.IResource, method: str) -> None:

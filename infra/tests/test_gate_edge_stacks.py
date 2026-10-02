@@ -247,3 +247,26 @@ def test_nfr_sec_04_proxy_and_gateway_errors_allow_configured_console(
             ]
             == "'http://localhost:5173'"
         )
+
+
+def test_api_function_has_one_api_wide_invoke_permission(
+    stacks: dict[str, assertions.Template],
+) -> None:
+    """A statement per method pushes the function policy past Lambda's 20 KB limit."""
+    edge = stacks["edge"]
+    [api_id] = [
+        logical
+        for logical, function in edge.find_resources("AWS::Lambda::Function").items()
+        if function["Properties"]["FunctionName"] == "aera-dev-api"
+    ]
+    grants = [
+        permission["Properties"]
+        for permission in edge.find_resources("AWS::Lambda::Permission").values()
+        if api_id in json.dumps(permission["Properties"]["FunctionName"])
+        and permission["Properties"]["Principal"] == "apigateway.amazonaws.com"
+    ]
+
+    assert len(grants) == 1
+    assert grants[0]["Action"] == "lambda:InvokeFunction"
+    source = json.dumps(grants[0]["SourceArn"])
+    assert "execute-api" in source and source.rstrip('"]}').endswith("/*/*/*")

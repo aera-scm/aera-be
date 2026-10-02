@@ -18,7 +18,8 @@ class WebStack(Stack):
         s3.Bucket(
             self,
             "Web",
-            bucket_name=f"aera-{env_name}-web",
+            # S3 names are global; the suffix keeps a clean account deployable (SRD 6.20).
+            bucket_name=f"aera-{env_name}-web-{self.account}-{self.region}",
             encryption=s3.BucketEncryption.S3_MANAGED,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             object_ownership=s3.ObjectOwnership.BUCKET_OWNER_ENFORCED,

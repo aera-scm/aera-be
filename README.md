@@ -193,7 +193,7 @@ The main CDK app synthesizes all nine stacks in SRD 6.16. Cognito has
 planner/approver/admin groups and a public authorization-code client; no users
 are created. The future browser client must use PKCE S256. Dev callbacks use
 `http://localhost:5173/callback` and logout uses `http://localhost:5173/`.
-The private `aera-dev-web` bucket is encrypted and requires TLS 1.2. CloudFront,
+The private `aera-dev-web-{account}-{region}` bucket is encrypted and requires TLS 1.2. CloudFront,
 the console and runtime services remain deferred. Shells contain one unused
 CloudFormation wait-condition handle (no wait condition) to make valid templates;
 the handle URL is never output. The budget app remains independent.

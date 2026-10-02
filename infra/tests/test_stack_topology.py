@@ -80,6 +80,18 @@ def test_nfr_mnt_02_all_stacks_and_dependencies() -> None:
             assert "Ref" not in str(artifact.template["Outputs"])
 
 
+def test_srd_6_20_web_bucket_name_carries_account_and_region() -> None:
+    app = build_app(DataSettings(env_name="dev", owner="synthetic-owner"))
+    template = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-web")))
+    [bucket] = template.find_resources("AWS::S3::Bucket").values()
+    parts = bucket["Properties"]["BucketName"]["Fn::Join"][1]
+    assert parts[0] == "aera-dev-web-"
+    assert {"Ref": "AWS::AccountId"} in parts
+    assert {"Ref": "AWS::Region"} in parts or "us-east-1" in "".join(
+        part for part in parts if isinstance(part, str)
+    )
+
+
 def test_nfr_sec_05_private_web_bucket() -> None:
     app = build_app(DataSettings(env_name="dev", owner="synthetic-owner"))
     template = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-web")))
@@ -87,7 +99,6 @@ def test_nfr_sec_05_private_web_bucket() -> None:
     template.has_resource_properties(
         "AWS::S3::Bucket",
         {
-            "BucketName": "aera-dev-web",
             "BucketEncryption": {
                 "ServerSideEncryptionConfiguration": [
                     {"ServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}},

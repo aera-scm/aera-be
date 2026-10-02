@@ -27,10 +27,8 @@ def test_ir_02_missing_official_inventory_fails(tmp_path: Path) -> None:
         metadata.check_inventory(tmp_path)
 
 
-def test_ir_02_repository_inventory_is_not_claimed_complete() -> None:
-    # Remove this assertion only when the owner supplies the six official files.
-    with pytest.raises(SapError):
-        metadata.check_inventory(Path("sap-mirror/metadata"))
+def test_ir_02_repository_holds_the_six_official_edmx_files() -> None:
+    assert metadata.check_inventory(Path("sap-mirror/metadata")) == 6
 
 
 def test_download_provenance_hashes_and_tampering(tmp_path: Path) -> None:

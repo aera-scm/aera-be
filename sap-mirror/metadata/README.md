@@ -1,9 +1,11 @@
-# Official metadata prerequisite (IR-02)
+# Official metadata inventory (IR-02)
 
-The six official EDMX files are not yet available. No synthetic schema is stored
-here. Tests under `tests/fixtures/sap/` prove transport behavior only.
+The six official EDMX files were downloaded from the SAP sandbox on 2026-10-02;
+`manifest.json` records each source URL, the retrieval time and a SHA-256 hash.
+No synthetic schema is stored here. Tests under `tests/fixtures/sap/` prove
+transport behavior only.
 
-Once the sandbox credential is available in `SAP_SANDBOX_API_KEY`, run:
+To refresh the inventory, with the sandbox credential in `SAP_SANDBOX_API_KEY`, run:
 
 ```sh
 uv run --locked python scripts/download_sap_metadata.py --download

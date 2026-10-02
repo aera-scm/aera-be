@@ -17,6 +17,7 @@
     "@cap-js/sqlite": "3.1.1",
     "@sap/cds": "10.1.1",
     "@sap/xssec": "4.15.0",
+    "aws-jwt-verify": "5.2.1",
     "express": "5.2.1"
   },
   "cds": {
@@ -36,6 +37,20 @@
         },
         "auth": {
           "kind": "dummy"
+        }
+      }
+    },
+    "[aws]": {
+      "requires": {
+        "db": {
+          "kind": "sqlite",
+          "credentials": {
+            "url": ":memory:"
+          }
+        },
+        "auth": {
+          "kind": "oauth",
+          "impl": "srv/auth.js"
         }
       }
     },

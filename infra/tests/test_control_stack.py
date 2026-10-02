@@ -236,3 +236,34 @@ def test_fr_ver_04_reasoning_policy_uses_the_service_rule_language(
         symbols = expression.replace("(", " ").replace(")", " ").split()
         unknown = [s for s in symbols if s not in operators | set(variables) and not s.isdigit()]
         assert unknown == []
+
+
+def test_adr_0026_only_the_reasoning_guardrail_uses_the_us_guardrail_profile(
+    templates: dict[str, assertions.Template],
+) -> None:
+    """Automated Reasoning checks need a cross-Region guardrail profile; nothing else gets one."""
+    control = templates["control"]
+    guardrails = control.find_resources("AWS::Bedrock::Guardrail").values()
+    [reasoning] = [g for g in guardrails if "AutomatedReasoningPolicyConfig" in g["Properties"]]
+    profile = json.dumps(reasoning["Properties"]["CrossRegionConfig"]["GuardrailProfileArn"])
+    assert ":guardrail-profile/us.guardrail.v1:0" in profile and "us-east-1" in profile
+    assert "global." not in profile
+
+    statements = [
+        statement
+        for policy in control.find_resources("AWS::IAM::Policy").values()
+        for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+        if "bedrock:ApplyGuardrail" in json.dumps(statement["Action"])
+    ]
+    assert any(
+        ":guardrail-profile/us.guardrail.v1:0" in json.dumps(s["Resource"]) for s in statements
+    )
+
+
+def test_adr_0026_input_guardrail_stays_in_region() -> None:
+    from infra.app import DataSettings, build_app
+
+    app = build_app(DataSettings(env_name="dev", owner="synthetic-owner"))
+    gate = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-gate")))
+    for guardrail in gate.find_resources("AWS::Bedrock::Guardrail").values():
+        assert "CrossRegionConfig" not in guardrail["Properties"]

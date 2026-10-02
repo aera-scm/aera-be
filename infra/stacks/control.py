@@ -32,6 +32,7 @@ from infra.stacks.data import DataStack
 from infra.stacks.reasoning_policy import add_reasoning_policy
 
 MIRROR_SECRET = "sap/mirror-oauth-client"  # pragma: allowlist secret (a name, not a value)
+REASONING_PROFILE = "us.guardrail.v1:0"
 
 
 def state_machine_name(env_name: str) -> str:
@@ -53,6 +54,11 @@ class ControlStack(Stack):
         require_deployable_environment(env_name)
         tables = data.tables
         policy_arn = add_reasoning_policy(self, env_name)
+        # ADR-0026: Automated Reasoning checks require a cross-Region guardrail profile.
+        # Only this guardrail gets one, and only the US profile.
+        reasoning_profile = self.format_arn(
+            service="bedrock", resource="guardrail-profile", resource_name=REASONING_PROFILE
+        )
         reasoning_guardrail = bedrock.CfnGuardrail(
             self,
             "ReasoningGuardrail",
@@ -65,6 +71,9 @@ class ControlStack(Stack):
                     policies=[policy_arn],
                     confidence_threshold=0.8,
                 )
+            ),
+            cross_region_config=bedrock.CfnGuardrail.GuardrailCrossRegionConfigProperty(
+                guardrail_profile_arn=reasoning_profile
             ),
             kms_key_arn=data.key.key_arn,
         )
@@ -361,6 +370,7 @@ class ControlStack(Stack):
                 resources=[
                     self.format_arn(service="bedrock", resource="guardrail/*"),
                     reasoning_guardrail.attr_guardrail_arn,
+                    reasoning_profile,
                 ],
             )
         )

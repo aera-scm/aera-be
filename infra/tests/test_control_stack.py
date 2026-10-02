@@ -109,7 +109,14 @@ def test_fr_ver_04_reasoning_policy_guardrail_and_verifier_wiring(
     [policy] = policies.values()
     rules = policy["Properties"]["PolicyDefinition"]["Rules"]
     assert {rule["Id"] for rule in rules} == {"BR05AUTO0001", "BR07DONOR001", "BR12RAR00001"}
-    assert "total_cost_cents < rar_protected_cents" in rules[2]["Expression"]
+    assert {rule["Id"]: rule["Expression"] for rule in rules} == {
+        "BR05AUTO0001": (
+            "(=> (= tier 1) (and (<= total_cost_cents auto_limit_cents) "
+            "(>= confidence confidence_min) all_reversible))"
+        ),
+        "BR07DONOR001": "(=> (or (= tier 1) (= tier 2)) donor_protection_ok)",
+        "BR12RAR00001": "(=> (or (= tier 1) (= tier 2)) (< total_cost_cents rar_protected_cents))",
+    }
     guardrails = control.find_resources("AWS::Bedrock::Guardrail")
     assert any("AutomatedReasoningPolicyConfig" in row["Properties"] for row in guardrails.values())
     params = control.find_resources("AWS::SSM::Parameter")
@@ -209,3 +216,23 @@ def test_srd_6_6_verifier_runs_on_plan_proposed_and_cannot_write_to_sap(
     ]
     assert policies and not any("SAP_WRITE_BASE" in p or "ses:Send" in p for p in policies)
     assert any("bedrock:ApplyGuardrail" in p for p in policies)
+
+
+def test_fr_ver_04_reasoning_policy_uses_the_service_rule_language(
+    templates: dict[str, assertions.Template],
+) -> None:
+    """The service takes SMT-LIB prefix expressions and upper-case built-in types only."""
+    [policy] = (
+        templates["control"].find_resources("AWS::Bedrock::AutomatedReasoningPolicy").values()
+    )
+    definition = policy["Properties"]["PolicyDefinition"]
+    variables = {row["Name"]: row["Type"] for row in definition["Variables"]}
+
+    assert set(variables.values()) <= {"INT", "BOOL"}
+    operators = {"=>", "=", "and", "or", "<", "<=", ">", ">="}
+    for rule in definition["Rules"]:
+        expression = rule["Expression"]
+        assert expression.startswith("(=> ") and expression.count("(") == expression.count(")")
+        symbols = expression.replace("(", " ").replace(")", " ").split()
+        unknown = [s for s in symbols if s not in operators | set(variables) and not s.isdigit()]
+        assert unknown == []

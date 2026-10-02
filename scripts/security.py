@@ -6,6 +6,26 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Not credentials: lockfile integrity digests, and the official SAP metadata inventory.
+# Its manifest holds SHA-256 hashes, and its schemas are SAP's published XML, whose bytes
+# `download_sap_metadata.py --check` pins to those hashes. A test keeps this list exact.
+UNSCANNED = frozenset(
+    {
+        "uv.lock",
+        "pnpm-lock.yaml",
+        "sap-mirror/metadata/manifest.json",
+        "sap-mirror/metadata/API_PURCHASEORDER_PROCESS_SRV.edmx",
+        "sap-mirror/metadata/API_MATERIAL_STOCK_SRV.edmx",
+        "sap-mirror/metadata/API_SALES_ORDER_SRV.edmx",
+        "sap-mirror/metadata/API_PRODUCTION_ORDER_2_SRV.edmx",
+        "sap-mirror/metadata/API_BUSINESS_PARTNER.edmx",
+        "sap-mirror/metadata/API_MATERIAL_DOCUMENT_SRV.edmx",
+    }
+)
+
+
+def scan_candidates(files: list[str]) -> list[str]:
+    return [name for name in files if name not in UNSCANNED]
 
 
 def repository_files() -> list[str]:
@@ -34,8 +54,7 @@ def main() -> int:
         for name in forbidden:
             print(name)
         return 1
-    # Lockfile integrity digests are not credentials; scan the manifests and source.
-    candidates = [name for name in files if name not in {"uv.lock", "pnpm-lock.yaml"}]
+    candidates = scan_candidates(files)
     result = subprocess.run(
         ["detect-secrets", "scan", "--no-verify", "--all-files", *candidates],
         cwd=ROOT,

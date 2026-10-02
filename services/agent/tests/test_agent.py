@@ -382,8 +382,8 @@ def test_two_consecutive_failures_escalate(ctx: ToolContext, bus: RecordingBus) 
 
     assert broken.run(start(ctx, "run-1")).end_reason == "LIMIT_ERROR"
     case = ctx.cases.get(CASE)
-    assert case is not None and case.status is CaseStatus.INVESTIGATING
-    assert RunStore(ctx.dynamodb, ENV).claim(CASE, "run-2")
-    assert broken.run({"caseId": CASE, "runId": "run-2"}).end_reason == "LIMIT_ERROR"
+    assert case is not None and case.status is CaseStatus.WAITING_PLANNER
+    assert case.active_run_id is None
+    assert broken.run(start(ctx, "run-2", CaseStatus.WAITING_PLANNER)).end_reason == "LIMIT_ERROR"
     case = ctx.cases.get(CASE)
     assert case is not None and case.status is CaseStatus.ESCALATED

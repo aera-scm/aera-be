@@ -110,3 +110,60 @@ def test_a_run_id_chosen_by_the_api_is_kept(dynamodb: Any, bus: RecordingBus, ca
     )
     assert started.run_id == "01J0000000000000000000RUN0"
     assert bus.details("RunStarted")[0]["actor"] == "user:u-1"
+
+
+def test_runtime_transport_failure_allows_next_start(
+    dynamodb: Any, bus: RecordingBus, case: str
+) -> None:
+    agentcore = FakeAgentCore(fail=True)
+    service = starter(dynamodb, bus, agentcore)
+    assert service.start(case, reason="opened").run_id is None
+    agentcore.fail = False
+    assert service.start(case, reason="retry").run_id is not None
+    assert len(agentcore.calls) == 1
+
+
+def test_retry_recovers_run_started_event_without_invoking_twice(
+    dynamodb: Any, bus: RecordingBus, case: str
+) -> None:
+    agentcore = FakeAgentCore()
+
+    class InterruptedBus(RecordingBus):
+        def put_events(self, Entries: list[dict[str, Any]]) -> dict[str, Any]:
+            raise ConnectionError("event transport interrupted")
+
+    service = starter(dynamodb, InterruptedBus(), agentcore)
+    with pytest.raises(ConnectionError):
+        service.start(case, reason="opened")
+    service.bus = bus
+    service.start(case, reason="opened")
+    assert len(agentcore.calls) == 1
+    assert bus.types() == ["RunStarted"]
+
+
+def test_second_runtime_failure_escalates(dynamodb: Any, bus: RecordingBus, case: str) -> None:
+    service = starter(dynamodb, bus, FakeAgentCore(fail=True))
+    service.start(case, reason="opened")
+    service.start(case, reason="retry")
+    stored = CaseStore(dynamodb, ENV).get(case)
+    assert stored is not None and stored.status is CaseStatus.ESCALATED
+    assert stored.active_run_id is None
+
+
+def test_retry_recovers_run_ended_event_then_starts_again(
+    dynamodb: Any, bus: RecordingBus, case: str
+) -> None:
+    agentcore = FakeAgentCore(fail=True)
+
+    class InterruptedBus(RecordingBus):
+        def put_events(self, Entries: list[dict[str, Any]]) -> dict[str, Any]:
+            raise ConnectionError("event transport interrupted")
+
+    service = starter(dynamodb, InterruptedBus(), agentcore)
+    with pytest.raises(ConnectionError):
+        service.start(case, reason="opened")
+    service.bus = bus
+    agentcore.fail = False
+    assert service.start(case, reason="retry").run_id is not None
+    assert bus.types() == ["RunEnded", "RunStarted"]
+    assert len(agentcore.calls) == 1

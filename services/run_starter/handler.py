@@ -17,7 +17,8 @@ from typing import Any
 
 from services.shared.case_state import can_transition
 from services.shared.cases import CaseStore, ConcurrentUpdateError, IllegalTransitionError
-from services.shared.models import CaseStatus, new_ulid
+from services.shared.dynamo import from_item, table_name, to_item
+from services.shared.models import CaseStatus, EventType, new_ulid
 from services.shared.observability import get_logger
 from services.shared.runs import RunStore
 from services.shared.runtime import emit
@@ -65,6 +66,17 @@ class RunStarter:
         constraints: dict[str, str] | None = None,
     ) -> Started:
         case = self.cases.get(case_id)
+        for pending in self._pending_events(case_id):
+            self._publish_event(case_id, pending)
+            if pending["eventType"] == "RunStarted" and (
+                run_id == pending["data"]["runId"]
+                or (
+                    run_id is None
+                    and case is not None
+                    and case.active_run_id == pending["data"]["runId"]
+                )
+            ):
+                return Started(str(pending["data"]["runId"]), "started")
         if case is None:
             return Started(None, "case not found")
         if case.status not in STARTABLE or not can_transition(
@@ -104,30 +116,89 @@ class RunStarter:
                 "runtime invocation failed",
                 extra={"caseId": case_id, "runId": run_id, "error": type(error).__name__},
             )
+            current = self.cases.get(case_id)
+            if current is not None and current.status is CaseStatus.INVESTIGATING:
+                self.cases.transition(
+                    case_id,
+                    CaseStatus.ESCALATED
+                    if self.runs.consecutive_failures(case_id) >= 1
+                    else CaseStatus.WAITING_PLANNER,
+                    actor="system",
+                    reason="runtime not reachable",
+                    expected=CaseStatus.INVESTIGATING,
+                    run_id=run_id,
+                )
             self.runs.release(
                 case_id, run_id, end_reason="LIMIT_ERROR", summary="runtime not reachable"
             )
-            emit(
-                self.bus,
+            self._event(
+                case_id,
                 "RunEnded",
                 {"caseId": case_id, "runId": run_id, "endReason": "LIMIT_ERROR"},
-                component=COMPONENT,
-                case_id=case_id,
-                run_id=run_id,
-                environment=self.env,
             )
             return Started(None, "runtime not reachable")
-        emit(
-            self.bus,
+        self._event(
+            case_id,
             "RunStarted",
             {"caseId": case_id, "runId": run_id, "reason": reason, "mode": mode},
-            component=COMPONENT,
-            case_id=case_id,
-            run_id=run_id,
             actor=actor,
-            environment=self.env,
         )
         return Started(run_id, "started")
+
+    def _event(
+        self, case_id: str, event_type: EventType, data: dict[str, Any], *, actor: str = "system"
+    ) -> None:
+        pending = {"eventType": event_type, "data": data, "actor": actor}
+        self.dynamodb.put_item(
+            TableName=table_name("cases", self.env),
+            Item=to_item(
+                {"PK": f"CASE#{case_id}", "SK": f"START_EVENT#{data['runId']}", **pending}
+            ),
+        )
+        self._publish_event(case_id, pending)
+
+    def _pending_events(self, case_id: str) -> list[dict[str, Any]]:
+        arguments: dict[str, Any] = {
+            "TableName": table_name("cases", self.env),
+            "KeyConditionExpression": "PK = :pk AND begins_with(SK, :event)",
+            "ExpressionAttributeValues": {
+                ":pk": {"S": f"CASE#{case_id}"},
+                ":event": {"S": "START_EVENT#"},
+            },
+            "ConsistentRead": True,
+        }
+        pending: list[dict[str, Any]] = []
+        while True:
+            page = self.dynamodb.query(**arguments)
+            pending.extend(from_item(item, keep_decimals=False) for item in page.get("Items", []))
+            if "LastEvaluatedKey" not in page:
+                return pending
+            arguments["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+    def _publish_event(self, case_id: str, pending: dict[str, Any]) -> None:
+        emit(
+            self.bus,
+            pending["eventType"],
+            pending["data"],
+            component=COMPONENT,
+            case_id=case_id,
+            run_id=pending["data"]["runId"],
+            actor=pending["actor"],
+            environment=self.env,
+        )
+        try:
+            self.dynamodb.delete_item(
+                TableName=table_name("cases", self.env),
+                Key={
+                    "PK": {"S": f"CASE#{case_id}"},
+                    "SK": {"S": f"START_EVENT#{pending['data']['runId']}"},
+                },
+                ConditionExpression="#data.runId = :run",
+                ExpressionAttributeNames={"#data": "data"},
+                ExpressionAttributeValues={":run": {"S": pending["data"]["runId"]}},
+            )
+        except self.dynamodb.exceptions.ConditionalCheckFailedException:
+            pass  # another delivery acknowledged it, or a newer run has an event pending
 
 
 _starter: RunStarter | None = None

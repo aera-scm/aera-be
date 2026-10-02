@@ -20,6 +20,7 @@ from strands.models import Model
 
 from services.agent.hooks import LimitHook, Limits, TerminationHook, TraceHook
 from services.agent.prompt import PROMPT_VERSION, opening_message, system_prompt
+from services.shared.cases import ConcurrentUpdateError
 from services.shared.models import CaseStatus
 from services.shared.observability import get_logger
 from services.shared.runs import RunStore
@@ -95,8 +96,23 @@ class Harness:
             end_reason = "LIMIT_ERROR"
         summary = self._summary(trace, end_reason)
         runs.release(case_id, run_id, end_reason=end_reason, summary=summary, usage=usage)
-        if end_reason == "LIMIT_ERROR" and runs.consecutive_failures(case_id) >= 2:
-            self._escalate(case_id, "two consecutive runs failed")
+        if end_reason == "LIMIT_ERROR":
+            if runs.consecutive_failures(case_id) >= 2:
+                self._escalate(case_id, "two consecutive runs failed")
+            else:
+                current = ctx.cases.get(case_id)
+                if current is not None and current.status is CaseStatus.INVESTIGATING:
+                    try:
+                        ctx.cases.transition(
+                            case_id,
+                            CaseStatus.WAITING_PLANNER,
+                            actor="system",
+                            reason="agent run failed; planner may retry",
+                            expected=CaseStatus.INVESTIGATING,
+                            run_id=run_id,
+                        )
+                    except ConcurrentUpdateError:
+                        pass
         trace.system("Run ended", end_reason)
         emit(
             ctx.bus,

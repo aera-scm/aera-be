@@ -57,7 +57,8 @@ TIME = {"type": "string", "description": "ISO 8601 date or time, UTC"}
 TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "get_case_evidence",
-        "Accepted signals of the case as tagged data, and extracted fields with their status.",
+        "Accepted signals of the case (sender, channel, time) and their extracted fields with "
+        "status. The message texts are in the guarded section of the run's first message.",
         {"caseId": S},
         ("caseId",),
         case_tools.get_case_evidence,

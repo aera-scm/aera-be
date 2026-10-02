@@ -17,6 +17,7 @@ from typing import Any
 
 from strands import Agent
 from strands.models import Model
+from strands.types.content import ContentBlock, GuardContentText
 
 from services.agent.hooks import LimitHook, Limits, TerminationHook, TraceHook
 from services.agent.prompt import PROMPT_VERSION, opening_message, system_prompt
@@ -26,7 +27,7 @@ from services.shared.observability import get_logger
 from services.shared.runs import RunStore
 from services.shared.runtime import emit
 from services.shared.trace import TraceStore
-from services.tools.case_tools import escalate
+from services.tools.case_tools import escalate, guarded_evidence
 from services.tools.context import ToolContext
 
 COMPONENT = "agent"
@@ -72,15 +73,21 @@ class Harness:
                 hooks=[trace, limit, termination],
                 callback_handler=None,
             )
-            agent(
-                opening_message(
-                    case,
-                    runs.history(case_id),
-                    mode=str(payload.get("mode", "investigate")),
-                    reason=payload.get("reason"),
-                    constraints=dict(payload.get("constraints") or {}),
-                )
+            opening = opening_message(
+                case,
+                runs.history(case_id),
+                mode=str(payload.get("mode", "investigate")),
+                reason=payload.get("reason"),
+                constraints=dict(payload.get("constraints") or {}),
             )
+            # NFR-SEC-02: outside text goes in a guardContent block. With the Converse API
+            # the guardrail then scans that block and not the trusted instructions.
+            outside: GuardContentText = {
+                "text": guarded_evidence(ctx, case_id),
+                "qualifiers": ["guard_content"],
+            }
+            blocks: list[ContentBlock] = [{"text": opening}, {"guardContent": {"text": outside}}]
+            agent(blocks)
             usage = dict(getattr(agent.event_loop_metrics, "accumulated_usage", {}) or {})
             if termination.ended is not None:
                 end_reason = termination.ended

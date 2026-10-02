@@ -127,6 +127,36 @@ def field_of(messages: Messages, name: str) -> dict[str, Any]:
     return next(f for f in evidence["fields"] if f["name"] == name)
 
 
+def test_nfr_sec_02_outside_text_reaches_the_model_only_in_guard_content(
+    ctx: ToolContext,
+) -> None:
+    """With the Converse API only guardContent blocks are scanned, so trusted instructions
+    must stay outside them and every outside text inside them."""
+    run, model = harness(
+        ctx,
+        [
+            Turn("I read the evidence first.", "get_case_evidence", {"caseId": CASE}),
+            Turn("No allowed action here.", "escalate", {"caseId": CASE, "reason": "test"}),
+        ],
+    )
+
+    run.run(start(ctx, "run-1"))
+
+    opening = model.seen[0][0]
+    assert opening["role"] == "user"
+    trusted = [block["text"] for block in opening["content"] if "text" in block]
+    [guarded] = [
+        block["guardContent"]["text"] for block in opening["content"] if "guardContent" in block
+    ]
+    assert guarded["qualifiers"] == ["guard_content"]
+    assert "only this much ready" in guarded["text"]
+    assert "Carrier status DELAYED" in guarded["text"]
+    assert len(trusted) == 1 and f"caseId {CASE}" in trusted[0]
+    everything_else = str(trusted) + str(model.seen[-1][1:])
+    assert "only this much ready" not in everything_else
+    assert "Carrier status DELAYED" not in everything_else
+
+
 def test_uc_05_unconfirmed_quantity_ends_the_run_with_a_planner_question(
     ctx: ToolContext, bus: RecordingBus
 ) -> None:
@@ -155,7 +185,7 @@ def test_uc_05_unconfirmed_quantity_ends_the_run_with_a_planner_question(
     assert case is not None and case.status is CaseStatus.WAITING_PLANNER
     assert case.active_run_id is None
     ended = bus.details("RunEnded")[-1]["data"]
-    assert (ended["endReason"], ended["promptVersion"]) == ("WAITING_PLANNER", "supervisor_v1")
+    assert (ended["endReason"], ended["promptVersion"]) == ("WAITING_PLANNER", "supervisor_v2")
     kinds = [e.kind for e in TraceStore(ctx.dynamodb, ENV).events(CASE)]
     assert kinds == [
         "SYSTEM",

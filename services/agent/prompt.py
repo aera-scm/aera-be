@@ -1,8 +1,9 @@
 """Prompt contract (SRD 6.3.3): versioned system prompt and the run's opening message.
 
 The opening message carries the case record and the summaries of earlier runs of the same
-case (SRD 6.18 "case context"); evidence itself only ever arrives through
-`get_case_evidence`, inside Guardrails input tags.
+case (SRD 6.18 "case context"). Text written by outside parties never goes into it: the
+harness adds it to the same message as a Guardrails `guardContent` block (NFR-SEC-02), which
+with the Converse API is what limits the guardrail scan to that text.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from typing import Any
 from services.shared.models import Case
 
 PROMPTS = Path(__file__).parent / "prompts"
-PROMPT_VERSION = "supervisor_v1"
+PROMPT_VERSION = "supervisor_v2"
 
 
 def system_prompt(version: str = PROMPT_VERSION) -> str:

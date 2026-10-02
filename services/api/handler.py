@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import os
 import re
@@ -828,22 +829,51 @@ class Api:
         key = http.header(event, "Idempotency-Key")
         if not key:
             return action()
+        if len(key) > 200:
+            raise Problem(400, "Idempotency key is too long")
         item_key = {"PK": {"S": f"API#{user.id}#{key}"}}
-        stored = self.dynamodb.get_item(
-            TableName=self._idempotency, Key=item_key, ConsistentRead=True
-        ).get("Item")
-        if stored is not None:
-            return dict(json.loads(stored["response"]["S"]))
-        result = action()
-        if result["statusCode"] < 500:
+        request = {
+            "method": event.get("httpMethod"),
+            "resource": event.get("resource"),
+            "params": event.get("pathParameters"),
+            "body": _json_body(event),
+            "roles": sorted(user.groups),
+            "email": user.email,
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        try:
             self.dynamodb.put_item(
                 TableName=self._idempotency,
                 Item={
                     **item_key,
-                    "response": {"S": json.dumps(result)},
+                    "fingerprint": {"S": fingerprint},
                     "ttl": {"N": str(int(time.time()) + 30 * 86400)},
                 },
+                ConditionExpression="attribute_not_exists(PK)",
             )
+        except self.dynamodb.exceptions.ConditionalCheckFailedException:
+            stored = self.dynamodb.get_item(
+                TableName=self._idempotency, Key=item_key, ConsistentRead=True
+            ).get("Item")
+            if not stored or stored.get("fingerprint", {}).get("S") != fingerprint:
+                raise Problem(409, "Idempotency key was used for another request") from None
+            if "response" not in stored:
+                raise Problem(409, "Request is in progress or its outcome needs review") from None
+            return dict(json.loads(stored["response"]["S"]))
+        # An unexpected failure leaves the claim intact: side effects may already exist.
+        try:
+            result = action()
+        except Problem as problem:
+            result = problem.response
+        self.dynamodb.update_item(
+            TableName=self._idempotency,
+            Key=item_key,
+            UpdateExpression="SET #response = :response",
+            ExpressionAttributeNames={"#response": "response"},
+            ExpressionAttributeValues={":response": {"S": json.dumps(result)}},
+        )
         return result
 
 

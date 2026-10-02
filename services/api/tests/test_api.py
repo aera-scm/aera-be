@@ -584,3 +584,43 @@ def test_nfr_sec_04_console_proxy_responses_have_scoped_cors(
         assert result["statusCode"] in {200, 403}
         assert (result["headers"].get("Access-Control-Allow-Origin") == origin) is allowed
         assert result["headers"].get("Vary") == "Origin"
+
+
+def test_idempotency_key_cannot_replay_a_different_action(api: Api, bus: RecordingBus) -> None:
+    headers = {"Idempotency-Key": "same-client-key"}
+    first = api.handle(
+        request("POST", "/signals", body={"sender": "supplier", "text": "one"}, headers=headers)
+    )
+    repeated = api.handle(
+        request("POST", "/signals", body={"sender": "supplier", "text": "two"}, headers=headers)
+    )
+    other_route = api.handle(request("POST", "/realtime/ticket", body={}, headers=headers))
+    assert first["statusCode"] == 202
+    assert repeated["statusCode"] == other_route["statusCode"] == 409
+    assert bus.types().count("SignalReceived") == 1
+
+
+def test_idempotency_claim_prevents_overlapping_side_effects(api: Api, dynamodb: Any) -> None:
+    event = request("POST", "/realtime/ticket", body={}, headers={"Idempotency-Key": "overlap"})
+    overlapping = []
+
+    def during_ticket(params: dict[str, Any], **kwargs: Any) -> None:
+        payload = json.loads(params["body"])
+        if payload["TableName"] == "aera-test-connections":
+            dynamodb.meta.events.unregister("before-call.dynamodb.PutItem", during_ticket)
+            overlapping.append(api.handle(event))
+
+    dynamodb.meta.events.register("before-call.dynamodb.PutItem", during_ticket)
+    first = api.handle(event)
+    assert first["statusCode"] == 201
+    assert overlapping[0]["statusCode"] == 409
+    assert api.handle(event) == first
+    assert dynamodb.scan(TableName="aera-test-connections")["Count"] == 1
+
+
+def test_idempotency_replay_cannot_survive_removed_role(api: Api) -> None:
+    headers = {"Idempotency-Key": "role-change"}
+    first = api.handle(request("POST", "/realtime/ticket", body={}, headers=headers))
+    denied = api.handle(request("POST", "/realtime/ticket", body={}, headers=headers, groups=""))
+    assert first["statusCode"] == 201
+    assert denied["statusCode"] == 409

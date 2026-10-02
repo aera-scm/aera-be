@@ -5,7 +5,7 @@ COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy PYTHONUNBUFFERED=1
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --no-default-groups --no-install-project
+RUN uv sync --locked --no-dev --no-default-groups --group interop --no-install-project
 COPY services ./services
 RUN useradd --uid 10001 --create-home app
 USER app

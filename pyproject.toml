@@ -17,6 +17,9 @@ dependencies = [
 ]
 
 [dependency-groups]
+interop = [
+    "bedrock-agentcore==1.23.1",
+]
 agent = [
     "bedrock-agentcore==1.23.1",
     "strands-agents==1.57.0",

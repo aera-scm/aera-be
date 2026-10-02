@@ -102,3 +102,14 @@ def test_fr_lab_02_channel_replay_requires_recorded_media_and_scoped_secrets() -
     assert variables["AERA_WHATSAPP_MEDIA"] == "replay"
     policies = json.dumps(template.find_resources("AWS::IAM::Policy"))
     assert "channels/whatsapp" in policies and "channels/carrier-webhook" in policies
+
+
+def test_fr_int_03_interop_image_installs_its_identity_sdk() -> None:
+    import tomllib
+
+    root = Path(__file__).resolve().parents[2]
+    config = tomllib.loads((root / "pyproject.toml").read_text())
+    dockerfile = (root / "services/interop/Dockerfile").read_text()
+    install = next(line for line in dockerfile.splitlines() if line.startswith("RUN uv sync"))
+    assert "--group interop" in install
+    assert "bedrock-agentcore==1.23.1" in config["dependency-groups"]["interop"]

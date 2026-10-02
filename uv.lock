@@ -50,6 +50,9 @@ dev = [
     { name = "ruff" },
     { name = "yamllint" },
 ]
+interop = [
+    { name = "bedrock-agentcore" },
+]
 load = [
     { name = "locust" },
 ]
@@ -88,6 +91,7 @@ dev = [
     { name = "ruff", specifier = "==0.16.8" },
     { name = "yamllint", specifier = "==1.38.0" },
 ]
+interop = [{ name = "bedrock-agentcore", specifier = "==1.23.1" }]
 load = [{ name = "locust", specifier = "==2.43.3" }]
 optimizer = [{ name = "ortools", specifier = "==9.15.6755" }]
 

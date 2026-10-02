@@ -123,19 +123,20 @@ class IdentityStack(Stack):
             client_secret=SecretValue.resource_attribute(service_client.attr_client_secret),
             discovery_url=self.interop_discovery_url,
         )
-        cognito.CfnUserPoolDomain(
-            self,
-            "HostedDomain",
-            user_pool_id=pool.ref,
-            # The Hosted UI URL is public, so it must not carry the account id. The first
-            # block of the stack GUID is unique per stack and stable for its lifetime.
-            domain=Fn.join(
-                "",
-                [
-                    f"aera-{env_name}-",
-                    Fn.select(0, Fn.split("-", Fn.select(2, Fn.split("/", self.stack_id)))),
-                ],
-            ),
+        # The Hosted UI URL is public, so it must not carry the account id. The first
+        # block of the stack GUID is unique per stack and stable for its lifetime.
+        domain = Fn.join(
+            "",
+            [
+                f"aera-{env_name}-",
+                Fn.select(0, Fn.split("-", Fn.select(2, Fn.split("/", self.stack_id)))),
+            ],
+        )
+        cognito.CfnUserPoolDomain(self, "HostedDomain", user_pool_id=pool.ref, domain=domain)
+        self.pool_id = pool.ref
+        self.issuer = Fn.join("", [f"https://cognito-idp.{self.region}.amazonaws.com/", pool.ref])
+        self.token_url = Fn.join(
+            "", ["https://", domain, f".auth.{self.region}.amazoncognito.com/oauth2/token"]
         )
         CfnOutput(self, "UserPoolId", value=pool.ref)
         CfnOutput(self, "ClientId", value=client.ref)

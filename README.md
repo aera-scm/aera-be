@@ -182,8 +182,13 @@ make register-mirror ENV=dev URL=https://<mirror-host>   # MIRROR_CLIENT_* in yo
 ```
 
 Production uses XSUAA client credentials and SAP HANA Cloud (`mta.yaml`,
-`xs-security.json`); dummy authentication and the in-memory database exist only in the
-development profile.
+`xs-security.json`); dummy authentication exists only in the development profile.
+
+Without SAP BTP, set `AERA_MIRROR_HOSTING=ecs`: the deployment then adds the
+`aera-{env}-mirror` stack, which runs the Mirror as one ECS Fargate task with its `aws`
+profile (in-memory SQLite, access tokens of the Cognito user pool), puts an API Gateway
+HTTP API in front of it and registers the URL and OAuth client by itself. The data returns
+to the reference scenario whenever the task restarts.
 
 ## SAP sandbox prerequisite
 

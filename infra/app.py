@@ -23,6 +23,7 @@ from infra.stacks.edge import EdgeStack
 from infra.stacks.gate import GateStack
 from infra.stacks.identity import IdentityStack
 from infra.stacks.interop import InteropStack
+from infra.stacks.mirror import MirrorStack
 from infra.stacks.observability import ObservabilityStack
 from infra.stacks.reasoning import ReasoningStack
 from infra.stacks.web import WebStack
@@ -48,6 +49,15 @@ class DataSettings:
     lab_delivery: str = "internal-replay"
     # False only where the account's concurrency limit leaves nothing to reserve.
     case_service_reserved: bool = True
+    # "ecs" hosts the SAP Mirror on ECS Fargate (SRD 6.15 fallback); None leaves it on BTP.
+    mirror_hosting: str | None = None
+
+
+def _mirror_hosting(environ: Mapping[str, str]) -> str | None:
+    value = environ.get("AERA_MIRROR_HOSTING", "").strip()
+    if value not in {"", "ecs"}:
+        raise ValueError("AERA_MIRROR_HOSTING must be empty (SAP BTP) or 'ecs' (ECS Fargate)")
+    return value or None
 
 
 def _case_service_reserved(environ: Mapping[str, str]) -> bool:
@@ -88,6 +98,7 @@ def data_settings_from_environment(environ: Mapping[str, str]) -> DataSettings:
         agent_card_url=_optional(environ, "AERA_AGENT_CARD_URL"),
         lab_delivery=_optional(environ, "AERA_LAB_DELIVERY") or "internal-replay",
         case_service_reserved=_case_service_reserved(environ),
+        mirror_hosting=_mirror_hosting(environ),
     )
 
 
@@ -190,6 +201,17 @@ def build_app(settings: DataSettings) -> App:
         agent_card_url=settings.agent_card_url,
         **common,
     )
+    if settings.mirror_hosting == "ecs":
+        stacks["mirror"] = MirrorStack(
+            app,
+            f"aera-{env_name}-mirror",
+            data=data,
+            pool_id=identity.pool_id,
+            pool_arn=identity.pool_arn,
+            issuer=identity.issuer,
+            token_url=identity.token_url,
+            **common,
+        )
     for component, stack_type in (
         ("web", WebStack),
         ("observability", ObservabilityStack),
@@ -213,6 +235,7 @@ def build_app(settings: DataSettings) -> App:
         "control": ("data", "reasoning"),
         "interop": ("edge", "identity"),
         "web": ("edge", "identity"),
+        **({"mirror": ("data", "identity")} if "mirror" in stacks else {}),
         "observability": tuple(name for name in stacks if name != "observability"),
     }
     for component, prerequisites in dependencies.items():

@@ -14,7 +14,8 @@ TRANSITIONS: dict[S, frozenset[S]] = {
     S.WAITING_SUPPLIER: frozenset({S.INVESTIGATING}),
     S.PLAN_PROPOSED: frozenset({S.VERIFIED, S.INVESTIGATING}),
     S.VERIFIED: frozenset({S.AUTO_APPROVED, S.AWAITING_APPROVAL, S.ESCALATED}),
-    S.AWAITING_APPROVAL: frozenset({S.APPROVED, S.REJECTED}),
+    # BR-23 after the deadline (ADR-0036): re-verified for the backup approver, or escalated.
+    S.AWAITING_APPROVAL: frozenset({S.APPROVED, S.REJECTED, S.INVESTIGATING, S.ESCALATED}),
     S.AUTO_APPROVED: frozenset({S.EXECUTING}),
     S.APPROVED: frozenset({S.EXECUTING}),
     S.EXECUTING: frozenset({S.MONITORING, S.FAILED_ROLLED_BACK, S.INVESTIGATING}),

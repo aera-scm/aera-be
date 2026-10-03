@@ -152,7 +152,7 @@ class VerifierService:
             stockout=facts.stockout,
             stockout_without=facts.stockout_without,
             plant=case.plant,
-            limits=self.control.limits(),
+            limits=self.control.limits(case_id=case_id),
             policy=policy,
         )
         if self.reasoning is not None:

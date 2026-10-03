@@ -42,6 +42,8 @@ SUPERVISOR_PROFILE_REGIONS = ("us-east-1", "us-east-2", "us-west-2")
 # What each tool may touch besides SAP reads.
 CASE_WRITERS = {"ask_planner", "request_supplier_info", "propose_plan", "escalate"}
 CALCULATORS = {"calc_impact", "calc_option"}
+# FR-LRN-02: option pricing reads the supplier reliability profile.
+RELIABILITY_READERS = {"get_supplier_reliability", "calc_option", "simulate_plan"}
 
 
 def _schema(spec: ToolSpec) -> agentcore.CfnGatewayTarget.SchemaDefinitionProperty:
@@ -116,7 +118,7 @@ class ReasoningStack(Stack):
                 data.bus.grant_put_events_to(fn)
             if spec.name == "request_supplier_info":
                 tables["dialogue"].grant_read_write_data(fn)
-            if spec.name == "get_supplier_reliability":
+            if spec.name in RELIABILITY_READERS:
                 tables["analytics"].grant_read_data(fn)
             fn.grant_invoke(gateway_role)
             agentcore.CfnGatewayTarget(

@@ -666,3 +666,43 @@ def test_fr_imp_03_every_emitted_source_reference_is_well_formed(
     ]
     for figure in figures:
         Figure.model_validate(figure)  # raises on a malformed sourceRef
+
+
+def test_srd_6_3_2_simulate_plan_says_what_is_wrong_with_an_option_id(ctx: ToolContext) -> None:
+    """Live 2026-10-03: the model sent id "OPT-A" and got an error without a reason, twice."""
+    result = BY_NAME["simulate_plan"].invoke(
+        ctx,
+        {
+            "caseId": CASE,
+            "options": [
+                {"id": "OPT-A", "actionType": "STO", "params": {"fromPlant": "1020", "qty": 600}}
+            ],
+        },
+    )
+
+    assert "one capital letter" in result["error"]
+
+
+def test_srd_6_3_2_invalid_tool_input_reaches_the_model_as_an_error() -> None:
+    from services.shared.models import Option
+    from services.tools.registry import ToolSpec
+
+    spec = ToolSpec(
+        "probe",
+        "",
+        {"value": {"type": "string"}},
+        (),
+        lambda ctx, value=None: {"option": Option.model_validate({"id": value}).id},
+    )
+
+    result = spec.invoke(None, {"value": "OPT-A"})  # type: ignore[arg-type]
+
+    assert result["error"].startswith("invalid input:")
+    assert "id" in result["error"]
+
+
+def test_srd_6_5_propose_plan_tells_the_model_the_plan_shape() -> None:
+    """Live 2026-10-03: plans with ids "OPT-A" and "chosenOptionIds" were refused twice."""
+    shape = BY_NAME["propose_plan"].properties["plan"]["description"]
+
+    assert all(word in shape for word in ('"chosen"', "one capital letter", "calc_option"))

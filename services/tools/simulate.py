@@ -61,6 +61,8 @@ def simulate_plan(ctx: ToolContext, case_id: str, options: list[dict[str, Any]])
         if not isinstance(spec, dict):
             raise ToolError("each option is an object {id, actionType, params}")
         option_id = str(spec.get("id") or "ABC"[index])
+        if not (len(option_id) == 1 and option_id.isupper()):
+            raise ToolError(f"option id {option_id!r} must be one capital letter, e.g. A")
         built.append(
             build_option(
                 ctx, case_id, option_id, str(spec.get("actionType")), dict(spec.get("params") or {})

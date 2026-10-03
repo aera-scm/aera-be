@@ -11,6 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import ValidationError
+
 from services.tools import calc, case_tools, reliability, sap_tools, simulate
 from services.tools.context import ToolContext, ToolError
 
@@ -44,6 +46,12 @@ class ToolSpec:
             return self.call(ctx, **kwargs)
         except ToolError as error:
             return {"error": str(error)}
+        except ValidationError as error:
+            # The model can correct its input only if it learns which field was wrong.
+            problems = "; ".join(
+                f"{'.'.join(str(part) for part in e['loc'])}: {e['msg']}" for e in error.errors()
+            )
+            return {"error": f"invalid input: {problems}"}
 
 
 def _snake(name: str) -> str:
@@ -134,7 +142,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         "simulate_plan",
         "Projected stock per plant (hourly 72 h, daily 30 days) for the baseline, each option "
         "and all options together: stock-outs, line stops and orders affected. options: "
-        "[{id, actionType, params}] as for calc_option. Read-only.",
+        "[{id, actionType, params}] as for calc_option; id is one capital letter (A, B, C). "
+        "Read-only.",
         {"caseId": S, "options": {"type": "array", "items": {"type": "object"}}},
         ("caseId", "options"),
         simulate.simulate_plan,
@@ -160,7 +169,21 @@ TOOLS: tuple[ToolSpec, ...] = (
         "propose_plan",
         "Submit the plan as Plan-schema JSON: options (2-3, each from calc_option results), "
         "chosen option ids and rationale. Ends the run when accepted.",
-        {"caseId": S, "plan": {"type": "object"}},
+        {
+            "caseId": S,
+            "plan": {
+                "type": "object",
+                # The Gateway passes only this text to the model, not a nested schema.
+                "description": (
+                    '{"options": [{"id": "A", "name": "...", "actions": [...], '
+                    '"coverageUnits": 600, "arrival": "...", "costUsd": 4100, '
+                    '"costSourceRef": "ratecard:...", "figures": [...], "rationale": "..."}], '
+                    '"chosen": ["A"], "rationale": "..."}. id is one capital letter. actions, '
+                    "coverageUnits, arrival, costUsd, costSourceRef and figures are copied "
+                    "unchanged from one calc_option result; numbers are JSON numbers."
+                ),
+            },
+        },
         ("caseId", "plan"),
         case_tools.propose_plan,
         ends_run=True,

@@ -126,6 +126,16 @@ class GateStack(Stack):
                 resources=["*"],
             )
         )
+        # FR-LNG-01, ADR-0038: the small model locates fields in Indonesian and German text,
+        # without tools; a value counts only if it appears verbatim in the Textract output.
+        extraction.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeModel"],
+                resources=[
+                    f"arn:{self.partition}:bedrock:{self.region}::foundation-model/amazon.nova-lite-*"
+                ],
+            )
+        )
         for fn in (extraction, mrp_poller):
             tables["config"].grant_read_data(fn)
 

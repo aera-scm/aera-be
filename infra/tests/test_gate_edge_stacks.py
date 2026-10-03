@@ -116,7 +116,19 @@ def test_least_privilege_for_ocr_and_guardrail(stacks: dict[str, assertions.Temp
     assert len(textract) == 1 and "extraction" in textract[0]
     assert len(guardrail) == 2
     assert all("gatekeeper" in r or "extraction" in r for r in guardrail)
-    assert "bedrock:InvokeModel" not in policy_text(stacks["gate"])
+    # ADR-0038: only extraction may invoke a model - the small model, in this Region, to
+    # locate fields in Indonesian and German text (FR-LNG-01). No other gate role may.
+    models = [
+        (role, statement)
+        for policy in policies.values()
+        for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+        for role in [json.dumps(policy["Properties"]["Roles"])]
+        if "bedrock:InvokeModel" in json.dumps(statement["Action"])
+    ]
+    assert len(models) == 1 and "extraction" in models[0][0]
+    resources = json.dumps(models[0][1]["Resource"])
+    assert "foundation-model/amazon.nova-lite-" in resources
+    assert "anthropic" not in resources and "inference-profile" not in resources
 
 
 def test_adr_0037_only_the_gatekeeper_reads_the_whatsapp_stand_ins(

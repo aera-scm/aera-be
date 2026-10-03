@@ -150,6 +150,7 @@ class VerifierService:
             verification,
             now=now,
             stockout=facts.stockout,
+            stockout_without=facts.stockout_without,
             plant=case.plant,
             limits=self.control.limits(),
             policy=policy,

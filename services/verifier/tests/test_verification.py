@@ -291,6 +291,29 @@ def test_BR_23_deadline_does_not_invent_time_for_late_freight() -> None:
     assert (pending.approver, pending.backup) == ("primary", "backup")
 
 
+def test_BR_23_ADR_0034_each_action_is_measured_with_the_rest_of_the_plan() -> None:
+    """Reference timing: stock-out in 6.2 h; the 5 h STO (C) bridges until +30 h, so the 17 h
+    air freight (A) may wait until +13 h, but the STO itself must be approved by +1.2 h."""
+    plan, facts = reference()
+    plan.chosen = ["C", "A"]
+    without = {"C": NOW + timedelta(hours=6.2), "A": NOW + timedelta(hours=30)}
+    part = routed(
+        verified(plan, facts), stockout_without=without, policy=Policy(auto_limit=D(0))
+    ).parts[-1]
+    assert set(part.options) == {"C", "A"}
+    assert part.deadline == NOW + timedelta(hours=6.2) - timedelta(hours=5)
+    later = {"C": NOW + timedelta(hours=40), "A": NOW + timedelta(hours=30)}
+    capped = routed(
+        verified(plan, facts), stockout_without=later, policy=Policy(auto_limit=D(0))
+    ).parts[-1]
+    assert capped.deadline == NOW + timedelta(hours=4)  # routed time + 4 h
+    none = {"C": None, "A": None}
+    open_ended = routed(
+        verified(plan, facts), stockout_without=none, policy=Policy(auto_limit=D(0))
+    ).parts[-1]
+    assert open_ended.deadline == NOW + timedelta(hours=4)
+
+
 def test_BR_05_kill_switch_and_stale_hash() -> None:
     reason = routed(verified(), policy=Policy(kill_switch=True)).reason
     assert reason is not None and reason.startswith("KILL_SWITCH")

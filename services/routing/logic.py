@@ -1,5 +1,6 @@
 """BR-05/17/22/23: tier selection, independent urgent parts and deadlines."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -69,7 +70,11 @@ def route(
     plant: str,
     limits: list[ApproverLimit],
     policy: Policy = DEFAULT_POLICY,
+    stockout_without: Mapping[str, datetime | None] | None = None,
 ) -> Route:
+    """`stockout_without[oid]`: the projected stock-out with every other chosen action in
+    place but not `oid` (None: no stock-out in the projection horizon). Without it, each
+    action is measured against `stockout` (ADR-0034)."""
     plan = verified.record.plan
     digest = plan_hash(plan)
 
@@ -126,8 +131,14 @@ def route(
         if tier == 1:
             return Part(part_id, ids, tier, cost, verified.confidence_for(ids), sampled)
         people = eligible(limits, plant, cost, now)
-        lead = max(verified.evidence[i].lead_hours for i in ids)
-        deadline = min(stockout - timedelta(hours=float(lead)), now + policy.approval_window)
+        # BR-23 (ADR-0034): each action must be approved by the time it can still arrive
+        # before the plant runs out with the rest of the plan in place.
+        latest = [now + policy.approval_window]
+        for i in ids:
+            horizon = stockout_without.get(i, stockout) if stockout_without else stockout
+            if horizon is not None:
+                latest.append(horizon - timedelta(hours=float(verified.evidence[i].lead_hours)))
+        deadline = min(latest)
         return Part(
             part_id,
             ids,

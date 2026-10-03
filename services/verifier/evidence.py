@@ -10,7 +10,7 @@ no evidence, and every check on it fails closed.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -54,6 +54,8 @@ class Facts:
     corroboration: Corroboration
     stockout: datetime
     source: str  # the grounding source for FR-VER-03 (grounding_source.render)
+    # BR-23 (ADR-0034): per chosen option, the projected stock-out without that option.
+    stockout_without: dict[str, datetime | None] = field(default_factory=dict)
 
 
 def _number(value: Any) -> Decimal | str:
@@ -323,4 +325,11 @@ class EvidenceReader:
         source = grounding_source.render(
             self.ctx, case, plan, impact, evidence, need_at, projector, self.supplier
         )
-        return Facts(evidence, self.corroboration(case), need_at, source)
+        chosen = [option for option in plan.options if option.id in plan.chosen]
+        stockout_without: dict[str, datetime | None] = {}
+        for option in chosen:
+            others = [other for other in chosen if other.id != option.id]
+            stockout_without[option.id] = (
+                projector.projections(others)[case.plant].first_stockout if others else need_at
+            )
+        return Facts(evidence, self.corroboration(case), need_at, source, stockout_without)

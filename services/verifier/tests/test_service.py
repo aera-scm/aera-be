@@ -379,3 +379,20 @@ def test_fr_ver_03_grounding_source_is_sentences_from_trusted_reads(
     assert "The chosen options C + A together cost USD 42,300 and cover 1,240 PC." in source
     assert "With the chosen options, plant 1010" in source
     assert "Supplier 1000871" in source and "compliance status" in source
+
+
+def test_br_23_reference_approval_window_is_open_with_the_sto_in_place(
+    ctx: ToolContext,  # noqa: F811
+    photo: Signal,  # noqa: F811
+    verifier: VerifierService,
+) -> None:
+    """ADR-0034: with the 5 h STO bridging the stock-out, the 17 h air freight part gets a
+    deadline after routing (previously stock-out minus 17 h, already past)."""
+    propose(ctx, photo, ["C", "A"])
+
+    verifier.handle(CASE, 1)
+
+    route = ControlStore(ctx.dynamodb, ENV).get(CASE, "ROUTE#1") or {}
+    [pending] = [p for p in route["parts"] if p["tier"] == 2]
+    deadline = datetime.fromisoformat(str(pending["deadline"]))
+    assert T0 < deadline <= T0 + timedelta(hours=4)

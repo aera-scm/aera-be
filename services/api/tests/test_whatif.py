@@ -133,3 +133,24 @@ def test_a_what_if_without_original_parameters_is_refused(api: Api, ctx: ToolCon
     )
 
     assert status == 400 and "no recalculation parameters" in body["detail"]
+
+
+def test_fr_sim_01_a_verified_plan_still_projects(api: Api, ctx: ToolContext) -> None:  # noqa: F811
+    """The Verifier adds its projection and Automated Reasoning record to the plan item."""
+    ctx.dynamodb.update_item(
+        TableName="aera-test-cases",
+        Key={"PK": {"S": f"CASE#{CASE}"}, "SK": {"S": "PLAN#1"}},
+        UpdateExpression="SET #projection = :projection, automatedReasoning = :reasoning",
+        ExpressionAttributeNames={"#projection": "projection"},
+        ExpressionAttributeValues={
+            ":projection": {"M": {"options": {"M": {}}}},
+            ":reasoning": {"M": {"status": {"S": "CONSISTENT"}, "findings": {"L": []}}},
+        },
+    )
+
+    status, body = call(api, "GET", "/cases/{id}/projection")
+    whatif_status, _ = call(
+        api, "POST", "/cases/{id}/whatif", {"optionId": "C", "params": {"qty": 400}}
+    )
+
+    assert (status, body["option"], whatif_status) == (200, "plan", 200)

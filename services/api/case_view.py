@@ -14,6 +14,7 @@ from services.shared.models import (
     Case,
     ExecutionView,
     PlanPartView,
+    PlanRecord,
     PlanView,
     ProposedPlan,
     RouteView,
@@ -59,13 +60,9 @@ def undo_summary(plan: ProposedPlan, option_ids: list[str]) -> list[UndoStep]:
     ]
 
 
-# Only the stored plan-record fields; other attributes on the item (projection, policy
-# statements, later additions) are not part of the console contract.
-PLAN_FIELDS = ("plan", "confidence", "checks", "proposedAt", "verifiedAt")
-
-
 def _plan(item: dict[str, Any], version_hash: str | None) -> PlanView:
-    data = {k: item[k] for k in PLAN_FIELDS if k in item}
+    # Other attributes on the item (projection, policy statements) are not in the contract.
+    data = PlanRecord.from_stored(item).model_dump(mode="json", by_alias=True)
     reasoning = item.get("automatedReasoning")
     if reasoning is not None:
         data["automatedReasoning"] = {

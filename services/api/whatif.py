@@ -34,10 +34,7 @@ def _record(ctx: ToolContext, case: Case) -> PlanRecord | None:
     ).get("Item")
     if item is None:
         return None
-    data = from_item(item)
-    for key in ("PK", "SK"):
-        data.pop(key, None)
-    return PlanRecord.model_validate(data)
+    return PlanRecord.from_stored(from_item(item))
 
 
 def _option(record: PlanRecord | None, option_id: str) -> Option:

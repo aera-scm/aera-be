@@ -119,6 +119,18 @@ def test_least_privilege_for_ocr_and_guardrail(stacks: dict[str, assertions.Temp
     assert "bedrock:InvokeModel" not in policy_text(stacks["gate"])
 
 
+def test_adr_0037_only_the_gatekeeper_reads_the_whatsapp_stand_ins(
+    stacks: dict[str, assertions.Template],
+) -> None:
+    policies = stacks["gate"].find_resources("AWS::IAM::Policy")
+    readers = [
+        json.dumps(p["Properties"]["Roles"])
+        for p in policies.values()
+        if "channels/whatsapp" in json.dumps(p["Properties"]["PolicyDocument"])
+    ]
+    assert len(readers) == 1 and "gatekeeper" in readers[0]
+
+
 def methods(template: assertions.Template) -> dict[tuple[str, str], str]:
     resources = template.find_resources("AWS::ApiGateway::Resource")
     paths: dict[str, str] = {}

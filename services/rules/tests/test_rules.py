@@ -385,3 +385,19 @@ def test_br_16_constraints_dates_and_exclusions() -> None:
     }
     assert read("What is the stock-out time?").constraints == {}
     assert read("by 2026-13-45").need_by is None
+
+
+def test_br_04_fr_com_04_a_team_phone_stands_in_for_a_master_data_number() -> None:
+    """ADR-0037: like the SES stand-in addresses, a team-controlled phone may stand in for a
+    supplier number held in SAP; it never creates a sender SAP does not know."""
+    from services.rules.br_04 import with_phone_standins
+
+    supplier = PartnerContact("1000234", "SUPPLIER", frozenset(), frozenset({"+447700900234"}))
+    standins = {"+62 812-0000-0000": "+447700900234", "+62 813-0000-0000": "+440000000000"}
+
+    contacts = with_phone_standins([supplier], standins)
+
+    assert verify_sender("WHATSAPP", "whatsapp:+6281200000000", contacts) is not None
+    assert verify_sender("WHATSAPP", "+6281300000000", contacts) is None  # maps to no partner
+    assert verify_sender("WHATSAPP", "+447700900234", contacts) is not None
+    assert with_phone_standins([supplier], {}) == [supplier]

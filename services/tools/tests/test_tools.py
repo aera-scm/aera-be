@@ -325,6 +325,45 @@ def test_fr_cht_02_planner_confirmed_quantity_is_cited_as_planner(
     assert [p["qty"] for p in split["parts"]] == [640, 960]
 
 
+@pytest.mark.parametrize("value", ["640 PC", "640 pcs", "640"])
+def test_br_02_a_confirmed_quantity_may_carry_the_order_unit(
+    ctx: ToolContext, carrier: Signal, value: str
+) -> None:
+    """Extraction keeps the unit the supplier wrote ("640 PC"); a planner may confirm it as is."""
+    record = signal(
+        ctx.dynamodb,
+        channel=SignalChannel.WHATSAPP,
+        text="PO 4500001234 - ready today",
+        fields=[("QUANTITY", value, 0.71, FieldStatus.UNCONFIRMED)],
+    )
+
+    option = calc.calc_option(
+        ctx,
+        CASE,
+        "AIR_FREIGHT",
+        {
+            "qtyFieldId": confirm(ctx, record),
+            "remainderAt": SEA_ETA.isoformat(),
+            "remainderSourceRef": f"signal:{carrier.signal_id}/ETA",
+        },
+    )
+
+    assert option["coverageUnits"] == 640
+
+
+@pytest.mark.parametrize("value", ["640 KG", "640 boxes", "about 640"])
+def test_br_02_a_quantity_in_another_unit_is_refused(ctx: ToolContext, value: str) -> None:
+    record = signal(
+        ctx.dynamodb,
+        channel=SignalChannel.WHATSAPP,
+        text="PO 4500001234 - ready today",
+        fields=[("QUANTITY", value, 0.71, FieldStatus.UNCONFIRMED)],
+    )
+
+    with pytest.raises(ToolError, match="quantity"):
+        calc.calc_option(ctx, CASE, "AIR_FREIGHT", {"qtyFieldId": confirm(ctx, record)})
+
+
 def test_alternate_supplier_option(ctx: ToolContext) -> None:
     option = calc.calc_option(
         ctx, CASE, "ALTERNATE_SUPPLIER", {"supplierId": "1000871", "qty": 800}

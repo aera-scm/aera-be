@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
@@ -186,7 +187,25 @@ def compute_impact(
     return result
 
 
-def _usable_quantity(ctx: ToolContext, case_id: str, field_id: str) -> tuple[Decimal, str]:
+# A supplier writes the unit with the number ("640 PC", "640 pcs"); only the order unit is read.
+_QUANTITY = re.compile(r"^\s*(\d[\d,]*(?:\.\d+)?)\s*([A-Za-z]{1,6})?\s*$")
+
+
+def _quantity(value: str, unit: str | None) -> Decimal:
+    match = _QUANTITY.match(value)
+    written = match.group(2).upper() if match and match.group(2) else None
+    if match is None or (
+        written is not None and (unit is None or written not in {unit.upper(), unit.upper() + "S"})
+    ):
+        raise ToolError(
+            f"quantity {value!r} is not a number in the order unit {unit or ''}".rstrip()
+        )
+    return decimal(match.group(1).replace(",", ""), "quantity")
+
+
+def _usable_quantity(
+    ctx: ToolContext, case_id: str, field_id: str, unit: str | None = None
+) -> tuple[Decimal, str]:
     for field in _fields(ctx, case_id):
         if field.field_id != field_id:
             continue
@@ -202,7 +221,7 @@ def _usable_quantity(ctx: ToolContext, case_id: str, field_id: str) -> tuple[Dec
             if field.confirmed_by
             else f"signal:{field.signal_id}/{field.name}"
         )
-        return decimal(field.value.replace(",", ""), "quantity"), reference
+        return _quantity(field.value, unit), reference
     raise ToolError(f"field {field_id} is not evidence of case {case_id}")
 
 
@@ -285,7 +304,10 @@ def compute_option(
         supplier = str(params.get("supplierId") or po["supplier"])
         field_id = params.get("qtyFieldId")
         if field_id:
-            qty, qty_ref = _usable_quantity(ctx, case_id, str(field_id))
+            item: dict[str, Any] = next(
+                (i for i in po["items"] if i.get("material") == case.material), {}
+            )
+            qty, qty_ref = _usable_quantity(ctx, case_id, str(field_id), item.get("unit"))
         else:
             qty = decimal(params.get("qty"), "qty")
             qty_ref = str(params.get("qtySourceRef") or "")

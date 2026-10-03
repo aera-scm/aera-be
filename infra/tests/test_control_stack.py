@@ -295,3 +295,20 @@ def test_fr_ver_03_verifier_has_an_in_region_grounding_guardrail(
         p["Properties"]["Name"] for p in control.find_resources("AWS::SSM::Parameter").values()
     }
     assert {"/aera/dev/GROUNDING_GUARDRAIL_ID", "/aera/dev/GROUNDING_GUARDRAIL_VERSION"} <= names
+
+
+def test_adr_0030_verifier_may_invoke_only_the_approval_policy(
+    templates: dict[str, assertions.Template],
+) -> None:
+    """Live: ApplyGuardrail on the reasoning guardrail was AccessDenied until the caller may
+    invoke the Automated Reasoning policy itself."""
+    control = templates["control"]
+    statements = [
+        statement
+        for policy in control.find_resources("AWS::IAM::Policy").values()
+        for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+        if "bedrock:InvokeAutomatedReasoningPolicy" in json.dumps(statement["Action"])
+    ]
+    assert len(statements) == 1
+    resources = json.dumps(statements[0]["Resource"])
+    assert "ApprovalReasoningPolicy" in resources and '"*"' not in resources

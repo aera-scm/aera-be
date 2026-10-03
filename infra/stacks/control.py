@@ -410,6 +410,14 @@ class ControlStack(Stack):
                 ],
             )
         )
+        # ADR-0030: a guardrail with an Automated Reasoning policy also checks that the caller
+        # may invoke that policy.
+        verifier.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeAutomatedReasoningPolicy"],
+                resources=[policy_arn, f"{policy_arn}:*"],
+            )
+        )
         verifier.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["scheduler:CreateSchedule"],

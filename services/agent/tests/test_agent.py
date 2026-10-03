@@ -185,7 +185,7 @@ def test_uc_05_unconfirmed_quantity_ends_the_run_with_a_planner_question(
     assert case is not None and case.status is CaseStatus.WAITING_PLANNER
     assert case.active_run_id is None
     ended = bus.details("RunEnded")[-1]["data"]
-    assert (ended["endReason"], ended["promptVersion"]) == ("WAITING_PLANNER", "supervisor_v3")
+    assert (ended["endReason"], ended["promptVersion"]) == ("WAITING_PLANNER", "supervisor_v4")
     kinds = [e.kind for e in TraceStore(ctx.dynamodb, ENV).events(CASE)]
     assert kinds == [
         "SYSTEM",
@@ -417,3 +417,14 @@ def test_two_consecutive_failures_escalate(ctx: ToolContext, bus: RecordingBus) 
     assert broken.run(start(ctx, "run-2", CaseStatus.WAITING_PLANNER)).end_reason == "LIMIT_ERROR"
     case = ctx.cases.get(CASE)
     assert case is not None and case.status is CaseStatus.ESCALATED
+
+
+def test_br_02_prompt_v4_routes_an_unconfirmed_partial_quantity_to_the_planner() -> None:
+    """Live 2026-10-03: the agent passed a MATERIAL field as qtyFieldId, missed the email's
+    QUANTITY field and planned without the supplier partial instead of asking the planner."""
+    from services.agent.prompt import system_prompt
+
+    text = system_prompt()
+
+    assert "`QUANTITY`" in text and "`qtyFieldId`" in text
+    assert "do not drop the partial" in text

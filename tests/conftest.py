@@ -1,0 +1,29 @@
+"""Keep operator environment variables out of offline tests."""
+
+import pytest
+
+OPERATOR_VARIABLES = (
+    "AERA_ENV",
+    "AERA_AWS_PROFILE",
+    "AERA_REGION",
+    "AERA_BUDGET_NAME",
+    "AERA_BUDGET_LIMIT_USD",
+    "AERA_BUDGET_RECIPIENTS",
+    "MODEL_SUPERVISOR_ID",
+    "MODEL_SMALL_ID",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "AERA_OWNER_TAG",
+    "AERA_SAP_SANDBOX_SECRET_NAME",
+    "AERA_SAP_MIRROR_SECRET_NAME",
+    "SAP_SANDBOX_API_KEY",
+    "MIRROR_TOKEN_URL",
+    "MIRROR_CLIENT_SECRET",
+    "MIRROR_CLIENT_ID",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolated_operator_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in OPERATOR_VARIABLES:
+        monkeypatch.delenv(name, raising=False)

@@ -1,0 +1,32 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "100000000000001",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {"display_phone_number": "447700900100", "phone_number_id": "100000000000002"},
+            "contacts": [{"profile": {"name": "Jonas Krieger"}, "wa_id": "447700900234"}],
+            "messages": [
+              {
+                "from": "447700900234",
+                "id": "wamid.HBgMNDQ3NzAwOTAwMjM0FQIAEhgUM0EwRkY1",
+                "timestamp": "1759645800",
+                "type": "image",
+                "image": {
+                  "caption": "PO 4500001234 - only this much ready, rest follows by sea",
+                  "mime_type": "image/jpeg",
+                  "sha256": "c2FtcGxlLWhhc2g=",
+                  "id": "900000000000001"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

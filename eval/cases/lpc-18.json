@@ -1,0 +1,88 @@
+{
+  "id": "lpc-18",
+  "category": "LATE_PO_CLEAR",
+  "subsets": [
+    "extended"
+  ],
+  "description": "Clear late PO: transfer 375 units while donor cover stays intact.",
+  "signals": [
+    "email-01",
+    "whatsapp-01",
+    "carrier-01"
+  ],
+  "plan": {
+    "options": [
+      {
+        "id": "A",
+        "name": "Air freight partial",
+        "actionType": "AIR_FREIGHT",
+        "qtyField": {
+          "signal": "whatsapp-01",
+          "field": "QUANTITY"
+        }
+      },
+      {
+        "id": "B",
+        "name": "Alternate supplier",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "params": {
+          "supplierId": "1000871",
+          "qty": 800
+        }
+      },
+      {
+        "id": "C",
+        "name": "Transfer 375 units from 1020",
+        "actionType": "STO",
+        "params": {
+          "fromPlant": "1020",
+          "qty": 375
+        }
+      }
+    ],
+    "chosen": [
+      "C"
+    ],
+    "rationale": "Transfer from 1020.",
+    "confirm": [
+      {
+        "signal": "whatsapp-01",
+        "field": "QUANTITY"
+      }
+    ],
+    "recovery": {
+      "signal": "carrier-01",
+      "field": "ETA"
+    }
+  },
+  "truth": {
+    "figures": {
+      "hoursToStockout": 6.2,
+      "unitsAtRisk": 1240,
+      "rarUsd": 4720000,
+      "lineStopHours": 24.8
+    },
+    "optionCosts": {
+      "A": 38200,
+      "B": 51900,
+      "C": 4100
+    },
+    "blocked": {
+      "B": [
+        "V-06"
+      ]
+    },
+    "tier": 1,
+    "status": "AUTO_APPROVED",
+    "released": 1,
+    "acceptable": [
+      [
+        "STO",
+        "AIR_FREIGHT"
+      ],
+      [
+        "STO"
+      ]
+    ]
+  }
+}

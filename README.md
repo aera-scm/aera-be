@@ -31,10 +31,245 @@ eval/          evaluation harness and cases
 
 ## Getting started
 
-```
-make bootstrap
-make mirror-local
-make test
+Python 3.12.14 and uv 0.12.18 are pinned for the foundation tooling. Install these
+before running the following commands from this repository:
+
+```sh
+uv sync --locked
+uv run --locked python scripts/check.py
+uv run --locked pre-commit run --all-files
 ```
 
+With GNU Make, `make setup`, `make check` and `make hooks` run the same commands.
+The direct commands also work on Windows without Make. Keep existing Git hooks:
+run pre-commit explicitly rather than replacing an existing `core.hooksPath`.
+
+Checks cover Ruff lint/format, strict mypy, YAML, pytest when tests exist, a secret
+scan and a dependency vulnerability audit (NFR-SEC-03, NFR-SEC-06). Package versions
+and transitive hashes are locked in `uv.lock`; CI rejects lockfile drift.
+Pytest failures, collection errors and an empty collection fail the check.
+
+The secret scan checks tracked and non-ignored candidate files, refuses credential
+file paths without reading their contents, and disables credential verification
+network calls. Lockfiles are excluded from secret detection because they contain
+integrity digests; their dependencies are covered by the vulnerability audit.
+Supply credentials only through runtime environment variables or Secrets Manager.
+
+Dependency installation and vulnerability audits need public registry access;
+installed lint, type, test and secret checks work without AWS. Run selected checks
+with `uv run --locked python scripts/check.py lint typecheck test secrets`.
+CI is validation
+only, with read-only repository permissions and no deployment credentials.
+
+## Budget gate
+
+An AWS Budget with actual-spend alerts at 50, 80 and 100% must exist before any
+other resource, including those created by `cdk bootstrap` (NFR-COST-01, C-02).
+`infra/budget_app.py` is a standalone CDK app holding one native budget resource;
+it deploys with CLI credentials and needs no bootstrap. The CDK CLI is pinned in
+`package.json` and installed with `pnpm install --frozen-lockfile` (Node 24.21.0).
+
+Inputs come from the environment, never from committed files:
+
+| Variable | Meaning |
+|---|---|
+| `AERA_AWS_PROFILE` | named AWS CLI profile |
+| `AERA_REGION` | deployment region (default `us-east-1`) |
+| `AERA_BUDGET_NAME` | budget name |
+| `AERA_BUDGET_LIMIT_USD` | approved monthly amount in USD |
+| `AERA_BUDGET_RECIPIENTS` | comma-separated alert email addresses (budget creation only) |
+
+```sh
+make budget ENV=dev        # deploy the budget stack, then verify it
+make check-budget          # verify amount, period, thresholds and subscribers
+make bootstrap ENV=dev     # verify the budget, then cdk bootstrap
+make deploy ENV=dev        # verify the budget, cdk bootstrap, then cdk deploy --all
+```
+
+Without Make, run `uv run --locked python scripts/deploy_dev.py <action> --env dev`.
+If an approved budget already exists, skip `make budget`; bootstrap and deploy verify
+the existing budget by name and never change it. A failed verification stops before
+any bootstrap or CloudFormation call. Only `dev` is accepted; `final` is deployed
+from a tagged release, never from a development checkout.
+
+## Region and model checks
+
+All data stays in one region, `us-east-1` (NFR-CMP-02). `MODEL_SMALL_ID` is a bare
+Amazon Nova or Claude model id used by direct regional inference (A-01).
+`MODEL_SUPERVISOR_ID` is an Anthropic Claude model id: either a bare direct regional id
+or, as the one recorded residency exception (ADR-0023), the US geographic inference
+profile (`us.anthropic.claude-...`), whose inference may run in `us-east-1`, `us-east-2`
+or `us-west-2`. Every other profile (`eu.`, `apac.`, `global.`, ...), a US profile for the
+small model, and ARNs are rejected, and every deployment command refuses any other region.
+
+```sh
+make check-region                       # offline: region configuration only
+make check-models                       # offline: model id format and family
+make check-region ARGS="--live"         # budget first, then one read-only list call
+                                        # per service: Guardrails, Automated Reasoning,
+                                        # AgentCore, Textract, Comprehend
+make check-models ARGS="--live"         # budget first, then per model: on demand,
+                                        # ACTIVE, authorized, agreement/entitlement
+make check-models ARGS="--live --invoke"  # plus one Converse call, at most 8 tokens
+```
+
+Live checks need `AERA_AWS_PROFILE` and `AERA_BUDGET_NAME`. Offline results say
+"not account evidence"; account checks and invocations print on their own labelled
+lines. Without Make, run `uv run --locked python scripts/check_region.py` or
+`scripts/check_model_access.py` with the same arguments.
+
+## Data layer and configuration
+
+`infra/app.py` is the main CDK app (`cdk.json` at the repository root). It holds the
+`aera-{env}-data` stack, pinned to `us-east-1`:
+
+- the ten DynamoDB tables of the data design (`aera-{env}-cases`, `-signals`, `-trace`,
+  `-ledger`, `-idempotency`, `-audit`, `-dialogue`, `-analytics`, `-config`,
+  `-connections`) with their keys, indexes, streams and `ttl` attributes; on-demand,
+  point-in-time recovery, project KMS key, deletion protection;
+- the `raw` (90-day expiry), `artefacts` and `audit` (Object Lock, compliance mode,
+  90 days) buckets, named `aera-{env}-{component}-{account}-{region}`: KMS-encrypted,
+  no public access, HTTPS with TLS 1.2 or later only;
+- the project KMS key `alias/aera-{env}`, the `aera-{env}` event bus;
+- SSM parameters `/aera/{env}/{KEY}` for model, Guardrail and SAP settings. Values not
+  provisioned yet hold the literal `UNSET`, never a guessed id or URL;
+- empty Secrets Manager containers `/aera/{env}/sap/sandbox-api-key` and
+  `/aera/{env}/sap/mirror-oauth-client`.
+
+Every resource is tagged `project`, `env`, `component` and `owner`; set `AERA_OWNER_TAG`.
+The case service reserves one concurrent execution. Lambda refuses any reservation while
+the account's concurrency limit is at its floor of 10; set
+`AERA_CASE_SERVICE_RESERVED_CONCURRENCY=0` to deploy without it until the limit is raised.
+Case opening stays transactional either way.
+Approved `MODEL_SUPERVISOR_ID` / `MODEL_SMALL_ID` are written to SSM when set, after the
+same validation as `check-models`. To use an existing approved secret instead of a new
+container, set `AERA_SAP_SANDBOX_SECRET_NAME` or `AERA_SAP_MIRROR_SECRET_NAME`.
+
+```sh
+make seed-config ENV=dev         # Config-table defaults; never overwrites existing values
+make provision-secrets ENV=dev   # SAP_SANDBOX_API_KEY from your shell into the container
+```
+
+`provision-secrets` reads the key only from the `SAP_SANDBOX_API_KEY` variable of its
+own process, never from arguments or files, and never prints it.
+
+## SAP Mirror
+
+`sap-mirror/` is a SAP CAP service that exposes the entity sets of the six S/4HANA APIs
+AERA uses (IR-02) under `/sap/opu/odata/sap/<API>`, the same path layout as an S/4HANA
+tenant, so switching to a licensed system is a configuration change (IR-03). It is labelled
+as an OData service with the S/4HANA schema, not SAP S/4HANA itself.
+
+- **Schema:** `db/s4.cds` is generated by `scripts/generate-model.mjs` from SAP's published
+  service schemas, which `scripts/fetch-sap-schemas.mjs` downloads by pinned integrity into
+  a gitignored cache. `model/fields.json` selects the fields; a name SAP does not define
+  fails generation. When the official EDMX inventory exists in `sap-mirror/metadata/`, a
+  test checks every field and type against it.
+- **Writes as S/4HANA does them:** CSRF token fetch, `If-Match` ETags (428 without, 412 when
+  stale), deep insert of stock transport orders, schedule-line split, goods receipts.
+- **Reference scenario:** `db/seed/*.csv` hold the SRD 6.6.3 data with dates relative to
+  `SCENARIO_T0` (`{T0+9d}` style tokens). `POST /admin/reset` restores it for any T0.
+  All data is synthetic: `.example` domains and phone numbers from the range reserved for
+  fiction.
+- **Custom entities** live in the customer-namespace service `ZAERA_MIRROR_SRV`: the MRP
+  exception feed and consumption rates. `ComplianceStatus` extends `A_Supplier`.
+
+```sh
+make mirror-local                       # SQLite in memory, seeded, http://localhost:4004
+node sap-mirror/scripts/fetch-sap-schemas.mjs && make mirror-model   # regenerate the model
+cd sap-mirror && mbt build && cf deploy mta_archives/aera-sap-mirror_0.0.0.mtar   # SAP BTP
+make register-mirror ENV=dev URL=https://<mirror-host>   # MIRROR_CLIENT_* in your shell
+```
+
+Production uses XSUAA client credentials and SAP HANA Cloud (`mta.yaml`,
+`xs-security.json`); dummy authentication exists only in the development profile.
+
+Without SAP BTP, set `AERA_MIRROR_HOSTING=ecs`: the deployment then adds the
+`aera-{env}-mirror` stack, which runs the Mirror as one ECS Fargate task with its `aws`
+profile (in-memory SQLite, access tokens of the Cognito user pool), puts an API Gateway
+HTTP API in front of it and registers the URL and OAuth client by itself. The data returns
+to the reference scenario whenever the task restarts.
+
+## SAP sandbox prerequisite
+
+Read-only SAP transport and official metadata checks are described in
+[`sap-mirror/metadata/README.md`](sap-mirror/metadata/README.md) (IR-01, IR-02).
+Synthetic test success is not live sandbox or schema evidence.
+
+## Identity and deployment foundations
+
+The main CDK app synthesizes all nine stacks in SRD 6.16. Cognito has
+planner/approver/admin groups and a public authorization-code client; no users
+are created. The future browser client must use PKCE S256. Dev callbacks use
+`http://localhost:5173/callback` and logout uses `http://localhost:5173/`.
+The private `aera-dev-web-{account}-{region}` bucket is encrypted and requires TLS 1.2. CloudFront,
+the console and runtime services remain deferred. Shells contain one unused
+CloudFormation wait-condition handle (no wait condition) to make valid templates;
+the handle URL is never output. The budget app remains independent.
+
+### Optional GitHub OIDC (NFR-SEC-03/06)
+
+OIDC resources are omitted unless `AERA_GITHUB_REPOSITORY` is explicitly set to
+the approved `owner/repository`. Enabling it also requires `AERA_CDK_QUALIFIER`,
+`AERA_BUDGET_NAME` and `AERA_GITHUB_PROVIDER_MODE` (`create` or `existing`). Keep
+the provider mode unchanged after provisioning: changing it removes an owned
+provider. Use `existing` only for a provider managed outside this stack.
+
+Trust permits only `repo:<approved-repository>:ref:refs/heads/main` with audience
+`sts.amazonaws.com`. The deployment role can assume only that qualifier's deploy,
+file-publishing and lookup roles in the current account and approved region,
+read the selected budget, and read the bootstrap version. The same scoped
+delegation includes the qualifier's image-publishing role for the ARM64 supervisor
+container. It cannot bootstrap or assume roles from another qualifier or region.
+PR validation has no OIDC permission. No frontend role is provisioned yet.
+
+Before enabling hosted deployment, the account owner must approve a dedicated dev
+bootstrap qualifier and a customer CloudFormation execution policy restricted
+to WP-0 resources in dev (including IAM role/provider operations), with no final
+access and no AdministratorAccess. The policy is an owner-managed prerequisite;
+its contents cannot be inferred from its ARN. Set its ARN locally as
+`AERA_CFN_EXECUTION_POLICY_ARN`. The existing budget-gated bootstrap/deploy command
+passes that policy and qualifier to CDK. Local profile inputs stay private.
+Do not enable hosted deployment until the actual bootstrap roles and execution
+policy have been reviewed in the account.
+
+Configure repository variables `AERA_REGION=us-east-1`, `AERA_OWNER_TAG`,
+`AERA_GITHUB_REPOSITORY`, `AERA_CDK_QUALIFIER`, `AERA_GITHUB_PROVIDER_MODE`,
+`AERA_BUDGET_NAME`, `AERA_BUDGET_LIMIT_USD` and `AERA_DEV_DEPLOY_ROLE_ARN`.
+Preserve any approved model IDs and existing-secret names with the corresponding
+`MODEL_*` and `AERA_SAP_*_SECRET_NAME` variables. These are names/IDs, never keys.
+Set `AERA_DEV_DEPLOY_ENABLED=true` only after initial local provisioning succeeds.
+
+`deploy-dev.yml` requires a successful CI run from a push to main in the same
+repository and checks out that exact tested commit. It gets temporary OIDC
+credentials, verifies the real budget, then deploys the existing foundations.
+It does not bootstrap, provision SAP key values, seed business data, or deploy a
+frontend bundle. Hosted CI, cloud deployment and live SAP evidence remain pending.
+
 Built for the AWS / SAP Agentic AI Hackathon, track: Intelligent Supply Chain.
+
+## Supervisor deployment boundary
+
+The reasoning stack packages each catalogue tool as a separate ARM64 Lambda,
+registers the tools with the IAM-authenticated AgentCore Gateway, and defines the
+supervisor as a Python 3.12 ARM64 container (SRD 6.18). The container build uses
+the frozen uv lockfile and runs as a non-root user. Idle sessions expire after
+15 minutes; maximum lifetime is one hour. Only application source and dependency
+manifests enter the Docker asset, not local configuration, caches or credentials.
+
+CDK builds and publishes the image to the bootstrap ECR repository during the
+existing budget-gated dev deployment. A running Linux Docker engine with ARM64
+build support is required. Synthesis alone neither builds an image nor deploys
+resources. Build the Lambda bundle separately before deployment as before.
+
+The console API emits CaseReadyForRun and returns the chosen run ID; only the
+run-starter invokes AgentCore. Neither runtime nor tool roles can invoke execution
+workflows or send notifications. Model IAM permits direct regional Claude/Nova
+models in us-east-1 and the US Claude inference profile; us-east-2 and us-west-2 are
+reachable only through that profile, and inference in any other region is denied.
+
+Offline tests cover schemas, IAM, packaging, event wiring and scripted reference
+runs. They do not establish a successful image build, ECR publication, live model
+or Gateway invocation, or the required reference-run p95 at most 90 seconds.
+Cloud acceptance requires the approved dev account, budget, model configuration,
+SAP Mirror and CloudFormation execution policy covering the implemented stacks.

@@ -1,0 +1,83 @@
+{
+  "id": "ms-08",
+  "category": "MATERIAL_SHORTAGE",
+  "subsets": [
+    "extended"
+  ],
+  "description": "Donor stock 760; transfer only 280 above two-day cover.",
+  "mirror": [
+    {
+      "entity": "A_MatlStkInAcctMod",
+      "where": {
+        "Material": "MAT-48219",
+        "Plant": "1020",
+        "InventoryStockType": "01"
+      },
+      "set": {
+        "MatlWrhsStkQtyInMatlBaseUnit": "760"
+      }
+    }
+  ],
+  "signals": [
+    "email-01",
+    "whatsapp-01",
+    "carrier-01"
+  ],
+  "plan": {
+    "options": [
+      {
+        "id": "A",
+        "name": "Air freight partial",
+        "actionType": "AIR_FREIGHT",
+        "qtyField": {
+          "signal": "whatsapp-01",
+          "field": "QUANTITY"
+        }
+      },
+      {
+        "id": "B",
+        "name": "Alternate supplier",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "params": {
+          "supplierId": "1000871",
+          "qty": 800
+        }
+      },
+      {
+        "id": "C",
+        "name": "Transfer 280 units from 1020",
+        "actionType": "STO",
+        "params": {
+          "fromPlant": "1020",
+          "qty": 280
+        }
+      }
+    ],
+    "chosen": [
+      "C"
+    ],
+    "rationale": "Transfer what 1020 can spare.",
+    "confirm": [
+      {
+        "signal": "whatsapp-01",
+        "field": "QUANTITY"
+      }
+    ],
+    "recovery": {
+      "signal": "carrier-01",
+      "field": "ETA"
+    }
+  },
+  "truth": {
+    "optionCosts": {
+      "C": 4100
+    },
+    "blocked": {
+      "B": [
+        "V-06"
+      ]
+    },
+    "tier": 1,
+    "status": "AUTO_APPROVED"
+  }
+}

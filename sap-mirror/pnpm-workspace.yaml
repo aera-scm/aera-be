@@ -1,0 +1,7 @@
+# Audit exceptions, each with a reason (NFR-SEC-06). Review when a patched version ships.
+auditConfig:
+  ignoreGhsas:
+    # braces <=3.0.3 stack exhaustion on deeply nested glob patterns, no patched version.
+    # Reached only through http-proxy-middleware's glob path filter; the OData V2 adapter
+    # sets no path filter, so micromatch and braces never run in the Mirror.
+    - GHSA-vfj7-8cjw-p6xm

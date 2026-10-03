@@ -1,0 +1,42 @@
+{
+  "retrievedAt": "2026-10-02T15:42:18.347076+00:00",
+  "method": "authenticated-https-get",
+  "files": [
+    {
+      "api": "API_PURCHASEORDER_PROCESS_SRV",
+      "file": "API_PURCHASEORDER_PROCESS_SRV.edmx",
+      "sourceRef": "https://sandbox.api.sap.com/s4hanacloud/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/$metadata",
+      "sha256": "e6e546a845deb716e1471b7dc6763969c6ca5d4f2290e22309492d320e5e385c"
+    },
+    {
+      "api": "API_MATERIAL_STOCK_SRV",
+      "file": "API_MATERIAL_STOCK_SRV.edmx",
+      "sourceRef": "https://sandbox.api.sap.com/s4hanacloud/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/$metadata",
+      "sha256": "b937a4863f7837247ce5902442d39c2bbe471136969a28117e699a5d2fd5cf89"
+    },
+    {
+      "api": "API_SALES_ORDER_SRV",
+      "file": "API_SALES_ORDER_SRV.edmx",
+      "sourceRef": "https://sandbox.api.sap.com/s4hanacloud/sap/opu/odata/sap/API_SALES_ORDER_SRV/$metadata",
+      "sha256": "8806ce73bb22dfa48b305a122fc305bb5d16098723278e61be085278046ddf2d"
+    },
+    {
+      "api": "API_PRODUCTION_ORDER_2_SRV",
+      "file": "API_PRODUCTION_ORDER_2_SRV.edmx",
+      "sourceRef": "https://sandbox.api.sap.com/s4hanacloud/sap/opu/odata/sap/API_PRODUCTION_ORDER_2_SRV/$metadata",
+      "sha256": "00fed64e8f00908c623dc85e5978ecdf95e1b86f5d4cd6e23a6fecfaa018a858"
+    },
+    {
+      "api": "API_BUSINESS_PARTNER",
+      "file": "API_BUSINESS_PARTNER.edmx",
+      "sourceRef": "https://sandbox.api.sap.com/s4hanacloud/sap/opu/odata/sap/API_BUSINESS_PARTNER/$metadata",
+      "sha256": "0f95de6b5c7378b547ca2f4f4254c5dda6307ce470c21a7bd9b525b6ad6a4f5b"
+    },
+    {
+      "api": "API_MATERIAL_DOCUMENT_SRV",
+      "file": "API_MATERIAL_DOCUMENT_SRV.edmx",
+      "sourceRef": "https://sandbox.api.sap.com/s4hanacloud/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/$metadata",
+      "sha256": "e7ab29da432eb7f45ea7e72bfb503ab30972cac0760b31f2e93bea66f2108350"
+    }
+  ]
+}

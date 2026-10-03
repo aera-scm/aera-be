@@ -1,0 +1,19 @@
+{
+  "xsappname": "aera-sap-mirror",
+  "tenant-mode": "dedicated",
+  "description": "AERA SAP Mirror: AERA reads and writes with OAuth 2.0 client credentials",
+  "scopes": [
+    { "name": "$XSAPPNAME.MirrorAdmin", "description": "Reset the reference scenario" }
+  ],
+  "role-templates": [
+    {
+      "name": "MirrorAdmin",
+      "description": "Reset the reference scenario",
+      "scope-references": ["$XSAPPNAME.MirrorAdmin"]
+    }
+  ],
+  "authorities": ["$XSAPPNAME.MirrorAdmin"],
+  "oauth2-configuration": {
+    "grant-types": ["client_credentials"]
+  }
+}

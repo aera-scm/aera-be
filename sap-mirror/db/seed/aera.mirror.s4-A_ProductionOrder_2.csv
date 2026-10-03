@@ -1,0 +1,6 @@
+ManufacturingOrder,ManufacturingOrderType,Material,ProductionPlant,MRPController,SalesOrder,SalesOrderItem,MfgOrderPlannedStartDate,MfgOrderPlannedStartTime,MfgOrderPlannedEndDate,MfgOrderPlannedEndTime,ProductionUnit,TotalQuantity,OrderIsReleased
+1000100,PP01,VEH-SEDAN-L2,1010,L02,,,{T0},{T0},{T0+8h},{T0+8h},PC,400,X
+1000101,PP01,VEH-SEDAN-L2,1010,L02,,,{T0+8h},{T0+8h},{T0+16h},{T0+16h},PC,400,X
+1000102,PP01,VEH-SEDAN-L2,1010,L02,,,{T0+16h},{T0+16h},{T0+24h},{T0+24h},PC,400,X
+1000103,PP01,VEH-SEDAN-L2,1010,L02,,,{T0+24h},{T0+24h},{T0+31h},{T0+31h},PC,350,X
+1000104,PP01,VEH-SEDAN-L2,1010,L02,,,{T0+9d+4h},{T0+9d+4h},{T0+9d+12h},{T0+9d+12h},PC,400,

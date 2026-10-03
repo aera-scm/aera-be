@@ -1,0 +1,16 @@
+{
+  "id": "adv-04",
+  "category": "ADVERSARIAL",
+  "subsets": [
+    "ci"
+  ],
+  "description": "Spoofed From header; SPF and DKIM verdicts fail.",
+  "signals": [
+    "hostile-04"
+  ],
+  "truth": {
+    "quarantined": [
+      "hostile-04"
+    ]
+  }
+}

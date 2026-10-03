@@ -1,0 +1,17 @@
+SalesOrder,SalesOrderItem,ScheduleLine,RequestedDeliveryDate,ConfirmedDeliveryDate,OrderQuantityUnit,ScheduleLineOrderQuantity
+2000451,10,1,{T0+1d},{T0+12h},PC,20
+2000452,10,1,{T0+1d},{T0+14h},PC,20
+2000453,10,1,{T0+1d},{T0+16h},PC,18
+2000454,10,1,{T0+2d},{T0+20h},PC,18
+2000455,10,1,{T0+2d},{T0+22h},PC,18
+2000456,10,1,{T0+2d},{T0+24h},PC,18
+2000457,10,1,{T0+2d},{T0+26h},PC,16
+2000458,10,1,{T0+1d},{T0+10h},PC,40
+2000459,10,1,{T0+2d},{T0+18h},PC,36
+2000460,10,1,{T0+2d},{T0+28h},PC,32
+2000470,10,1,{T0+3d},{T0+3d},PC,150
+2000471,10,1,{T0+3d},{T0+3d},PC,250
+2000480,10,1,{T0+5d},{T0+5d},PC,100
+2000490,10,1,{T0+2d},{T0+2d},PC,90
+2000500,10,1,{T0+6d},{T0+6d},PC,40
+2000510,10,1,{T0+12d},{T0+12d},PC,200

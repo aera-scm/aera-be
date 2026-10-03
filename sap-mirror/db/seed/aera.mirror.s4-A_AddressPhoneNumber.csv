@@ -1,0 +1,5 @@
+# Numbers are in Ofcom's range reserved for fiction (+44 7700 900000-900999); never real.
+AddressID,Person,OrdinalNumber,DestinationLocationCountry,IsDefaultPhoneNumber,PhoneNumber,InternationalPhoneNumber,PhoneNumberType
+22001,,1,GB,true,07700900234,+447700900234,3
+22002,,1,GB,true,07700900871,+447700900871,3
+22003,,1,GB,true,07700900950,+447700900950,3

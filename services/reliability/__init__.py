@@ -1,0 +1,1 @@
+"""Supplier reliability refresh Lambda."""

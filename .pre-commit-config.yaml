@@ -1,0 +1,22 @@
+# NFR-SEC-03 / NFR-SEC-06: use the same locked tools as CI.
+repos:
+  - repo: local
+    hooks:
+      - id: lint
+        name: Python and YAML lint
+        entry: uv run --locked python scripts/check.py lint
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: typecheck
+        name: Python strict type check
+        entry: uv run --locked python scripts/check.py typecheck
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: secrets
+        name: Repository secret scan
+        entry: uv run --locked python scripts/security.py
+        language: system
+        pass_filenames: false
+        always_run: true

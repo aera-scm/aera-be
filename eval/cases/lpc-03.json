@@ -1,0 +1,92 @@
+{
+  "id": "lpc-03",
+  "category": "LATE_PO_CLEAR",
+  "subsets": [
+    "ci"
+  ],
+  "description": "Alternate supplier approved: USD 51,900 needs the backup approver's limit.",
+  "mirror": [
+    {
+      "entity": "A_Supplier",
+      "where": {
+        "Supplier": "1000871"
+      },
+      "set": {
+        "ComplianceStatus": "APPROVED"
+      }
+    }
+  ],
+  "signals": [
+    "email-01",
+    "whatsapp-01",
+    "carrier-01"
+  ],
+  "plan": {
+    "options": [
+      {
+        "id": "A",
+        "name": "Air freight partial",
+        "actionType": "AIR_FREIGHT",
+        "qtyField": {
+          "signal": "whatsapp-01",
+          "field": "QUANTITY"
+        }
+      },
+      {
+        "id": "B",
+        "name": "Alternate supplier",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "params": {
+          "supplierId": "1000871",
+          "qty": 800
+        }
+      },
+      {
+        "id": "C",
+        "name": "Transfer from 1020",
+        "actionType": "STO",
+        "params": {
+          "fromPlant": "1020",
+          "qty": 600
+        }
+      }
+    ],
+    "chosen": [
+      "B"
+    ],
+    "rationale": "Alternate supplier for the full quantity.",
+    "confirm": [
+      {
+        "signal": "whatsapp-01",
+        "field": "QUANTITY"
+      }
+    ],
+    "recovery": {
+      "signal": "carrier-01",
+      "field": "ETA"
+    }
+  },
+  "truth": {
+    "optionCosts": {
+      "A": 38200,
+      "B": 51900,
+      "C": 4100
+    },
+    "blocked": {},
+    "tier": 2,
+    "status": "AWAITING_APPROVAL",
+    "released": 0,
+    "acceptable": [
+      [
+        "ALTERNATE_SUPPLIER"
+      ],
+      [
+        "STO",
+        "AIR_FREIGHT"
+      ],
+      [
+        "STO"
+      ]
+    ]
+  }
+}

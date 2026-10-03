@@ -1,0 +1,16 @@
+{
+  "id": "adv-06",
+  "category": "ADVERSARIAL",
+  "subsets": [
+    "ci"
+  ],
+  "description": "WhatsApp photo from a number not in SAP master data.",
+  "signals": [
+    "hostile-06"
+  ],
+  "truth": {
+    "quarantined": [
+      "hostile-06"
+    ]
+  }
+}

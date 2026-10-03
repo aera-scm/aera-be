@@ -1,0 +1,461 @@
+"""Control stack (SRD 6.16): the governed execution workflow and the routing outbox relay
+(FR-EXE-01..08, BR-08..10, SRD 6.8, 6.17).
+
+- `aera-{env}-execution` state machine (Step Functions Standard) runs every SAP write; its
+  task Lambda is the only function with AERA_SAP_WRITES and the SAP write endpoint
+  (FR-EXE-01).
+- `PlanApproved` on the bus starts it; routing publishes that event through the outbox relay.
+- Goods-receipt checks are one-shot EventBridge Scheduler schedules that put
+  `GoodsReceiptDue` on the bus (FR-MON-01).
+"""
+
+import json
+from typing import Any
+
+from aws_cdk import Duration, Fn, Stack
+from aws_cdk import aws_bedrock as bedrock
+from aws_cdk import aws_events as events
+from aws_cdk import aws_events_targets as targets
+from aws_cdk import aws_iam as iam
+from aws_cdk import aws_lambda as lambda_
+from aws_cdk import aws_lambda_event_sources as sources
+from aws_cdk import aws_logs as logs
+from aws_cdk import aws_sqs as sqs
+from aws_cdk import aws_ssm as ssm
+from aws_cdk import aws_stepfunctions as sfn
+from constructs import Construct
+
+from infra.constructs.execution_workflow import definition
+from infra.constructs.service_function import ServiceFunction
+from infra.environments import require_deployable_environment
+from infra.stacks.data import DataStack
+from infra.stacks.reasoning_policy import add_reasoning_policy
+
+MIRROR_SECRET = "sap/mirror-oauth-client"  # pragma: allowlist secret (a name, not a value)
+REASONING_PROFILE = "us.guardrail.v1:0"
+
+
+def state_machine_name(env_name: str) -> str:
+    return f"aera-{env_name}-execution"
+
+
+class ControlStack(Stack):
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        *,
+        env_name: str,
+        data: DataStack,
+        code: lambda_.Code,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(scope, construct_id, **kwargs)
+        require_deployable_environment(env_name)
+        tables = data.tables
+        policy_arn = add_reasoning_policy(self, env_name)
+        # ADR-0026: Automated Reasoning checks require a cross-Region guardrail profile.
+        # Only this guardrail gets one, and only the US profile.
+        reasoning_profile = self.format_arn(
+            service="bedrock", resource="guardrail-profile", resource_name=REASONING_PROFILE
+        )
+        reasoning_guardrail = bedrock.CfnGuardrail(
+            self,
+            "ReasoningGuardrail",
+            name=f"aera-{env_name}-approval-reasoning",
+            description="English approval policy findings (FR-VER-04)",
+            blocked_input_messaging="Automated Reasoning policy flagged the input.",
+            blocked_outputs_messaging="Automated Reasoning policy flagged the output.",
+            automated_reasoning_policy_config=(
+                bedrock.CfnGuardrail.AutomatedReasoningPolicyConfigProperty(
+                    policies=[policy_arn],
+                    confidence_threshold=0.8,
+                )
+            ),
+            cross_region_config=bedrock.CfnGuardrail.GuardrailCrossRegionConfigProperty(
+                guardrail_profile_arn=reasoning_profile
+            ),
+            kms_key_arn=data.key.key_arn,
+        )
+        reasoning_version = bedrock.CfnGuardrailVersion(
+            self,
+            "ReasoningGuardrailVersion",
+            guardrail_identifier=reasoning_guardrail.attr_guardrail_id,
+        )
+        # ADR-0031: FR-VER-03 contextual grounding of the plan rationale. Its own guardrail,
+        # in this Region only (no cross-Region profile, NFR-CMP-02).
+        grounding_guardrail = bedrock.CfnGuardrail(
+            self,
+            "GroundingGuardrail",
+            name=f"aera-{env_name}-plan-grounding",
+            description="Contextual grounding of the plan rationale (FR-VER-03)",
+            blocked_input_messaging="Blocked by the AERA grounding guardrail.",
+            blocked_outputs_messaging="Plan rationale is not grounded in the SAP data.",
+            contextual_grounding_policy_config=(
+                bedrock.CfnGuardrail.ContextualGroundingPolicyConfigProperty(
+                    filters_config=[
+                        bedrock.CfnGuardrail.ContextualGroundingFilterConfigProperty(
+                            type=kind, threshold=0.7
+                        )
+                        for kind in ("GROUNDING", "RELEVANCE")
+                    ]
+                )
+            ),
+            kms_key_arn=data.key.key_arn,
+        )
+        grounding_version = bedrock.CfnGuardrailVersion(
+            self,
+            "GroundingGuardrailVersion",
+            guardrail_identifier=grounding_guardrail.attr_guardrail_id,
+        )
+        for key, value in (
+            ("REASONING_GUARDRAIL_ID", reasoning_guardrail.attr_guardrail_id),
+            ("REASONING_GUARDRAIL_VERSION", reasoning_version.attr_version),
+            ("GROUNDING_GUARDRAIL_ID", grounding_guardrail.attr_guardrail_id),
+            ("GROUNDING_GUARDRAIL_VERSION", grounding_version.attr_version),
+        ):
+            ssm.StringParameter(
+                self,
+                f"Param{key}",
+                parameter_name=f"/aera/{env_name}/{key}",
+                string_value=value,
+            )
+
+        scheduler_role = iam.Role(
+            self,
+            "GoodsReceiptSchedulerRole",
+            assumed_by=iam.ServicePrincipal(
+                "scheduler.amazonaws.com",
+                conditions={"StringEquals": {"aws:SourceAccount": self.account}},
+            ),
+        )
+        data.bus.grant_put_events_to(scheduler_role)
+
+        execution = ServiceFunction(
+            self,
+            "execution",
+            env_name=env_name,
+            component="execution",
+            code=code,
+            environment={
+                "AERA_SAP_WRITES": "1",
+                "AERA_BUS_ARN": data.bus.event_bus_arn,
+                "AERA_SCHEDULER_ROLE_ARN": scheduler_role.role_arn,
+            },
+            secrets=(MIRROR_SECRET,),
+            parameters=("SAP_READ_BASE", "SAP_WRITE_BASE"),
+            timeout=Duration.minutes(5),
+            memory_mb=1024,
+        ).function
+        for name in ("cases", "audit", "idempotency", "ledger", "signals"):
+            tables[name].grant_read_write_data(execution)
+        tables["config"].grant_read_data(execution)
+        data.bus.grant_put_events_to(execution)
+        data.key.grant_encrypt_decrypt(execution)
+        execution.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["scheduler:CreateSchedule"],
+                resources=[
+                    self.format_arn(
+                        service="scheduler",
+                        resource="schedule",
+                        resource_name=f"default/aera-{env_name}-gr-*",
+                    )
+                ],
+            )
+        )
+        scheduler_role.grant_pass_role(execution.grant_principal)
+
+        machine_role = iam.Role(
+            self, "WorkflowRole", assumed_by=iam.ServicePrincipal("states.amazonaws.com")
+        )
+        execution.grant_invoke(machine_role)
+        log_group = logs.LogGroup(
+            self,
+            "WorkflowLogs",
+            log_group_name=f"/aws/vendedlogs/states/aera-{env_name}-execution",
+            retention=logs.RetentionDays.ONE_MONTH,
+        )
+        machine = sfn.StateMachine(
+            self,
+            "Workflow",
+            state_machine_name=state_machine_name(env_name),
+            state_machine_type=sfn.StateMachineType.STANDARD,
+            definition_body=sfn.DefinitionBody.from_string(
+                json.dumps(definition(execution.function_arn))
+            ),
+            role=machine_role,
+            tracing_enabled=True,
+            logs=sfn.LogOptions(destination=log_group, level=sfn.LogLevel.ERROR),
+        )
+
+        dead_letters = sqs.Queue(
+            self,
+            "DeadLetters",
+            queue_name=f"aera-{env_name}-control-dlq",
+            encryption=sqs.QueueEncryption.SQS_MANAGED,
+            retention_period=Duration.days(14),
+            enforce_ssl=True,
+        )
+        events.Rule(
+            self,
+            "OnPlanApproved",
+            rule_name=f"aera-{env_name}-execution",
+            event_bus=data.bus,
+            event_pattern=events.EventPattern(
+                source=events.Match.prefix("aera."), detail_type=["PlanApproved"]
+            ),
+            targets=[
+                targets.SfnStateMachine(
+                    machine,
+                    input=events.RuleTargetInput.from_object(
+                        {
+                            "mode": "execute",
+                            "caseId": events.EventField.from_path("$.detail.data.caseId"),
+                            "planPartId": events.EventField.from_path("$.detail.data.planPartId"),
+                        }
+                    ),
+                    retry_attempts=4,
+                    dead_letter_queue=dead_letters,
+                )
+            ],
+        )
+
+        relay = ServiceFunction(
+            self, "outbox", env_name=env_name, component="outbox", code=code
+        ).function
+        tables["cases"].grant_read_write_data(relay)
+        data.bus.grant_put_events_to(relay)
+        data.key.grant_encrypt_decrypt(relay)
+        relay.add_event_source(
+            sources.DynamoEventSource(
+                tables["cases"],
+                starting_position=lambda_.StartingPosition.LATEST,
+                batch_size=25,
+                retry_attempts=5,
+                filters=[
+                    lambda_.FilterCriteria.filter(
+                        {
+                            "eventName": lambda_.FilterRule.is_equal("INSERT"),
+                            "dynamodb": {
+                                "Keys": {"SK": {"S": lambda_.FilterRule.begins_with("OUTBOX#")}}
+                            },
+                        }
+                    )
+                ],
+            )
+        )
+        # Notifier: the only function allowed to send (FR-COM-02, BR-03).
+        notifier = ServiceFunction(
+            self,
+            "notifier",
+            env_name=env_name,
+            component="notifier",
+            code=code,
+            secrets=(MIRROR_SECRET, "channels/email-standins", "channels/whatsapp"),
+            parameters=("SAP_READ_BASE",),
+        ).function
+        for name in ("cases", "audit", "dialogue"):
+            tables[name].grant_read_write_data(notifier)
+        tables["config"].grant_read_data(notifier)
+        tables["signals"].grant_read_data(notifier)
+        data.key.grant_encrypt_decrypt(notifier)
+        notifier.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["ses:SendEmail"],
+                resources=[self.format_arn(service="ses", resource="identity", resource_name="*")],
+            )
+        )
+        events.Rule(
+            self,
+            "SupplierDialogueSweep",
+            rule_name=f"aera-{env_name}-dialogue-sweep",
+            schedule=events.Schedule.rate(Duration.minutes(1)),
+            targets=[
+                targets.LambdaFunction(
+                    notifier, event=events.RuleTargetInput.from_object({"task": "dialogueSweep"})
+                )
+            ],
+        )
+        replies = ServiceFunction(
+            self,
+            "dialogue-replies",
+            env_name=env_name,
+            component="dialogue-replies",
+            code=code,
+        ).function
+        for name in ("dialogue", "cases", "audit"):
+            tables[name].grant_read_write_data(replies)
+        tables["signals"].grant_read_data(replies)
+        data.bus.grant_put_events_to(replies)
+        data.key.grant_encrypt_decrypt(replies)
+        events.Rule(
+            self,
+            "OnSupplierReply",
+            rule_name=f"aera-{env_name}-supplier-reply",
+            event_bus=data.bus,
+            event_pattern=events.EventPattern(
+                source=events.Match.prefix("aera."), detail_type=["CaseUpdated"]
+            ),
+            targets=[
+                targets.LambdaFunction(replies, retry_attempts=8, dead_letter_queue=dead_letters)
+            ],
+        )
+        reliability = ServiceFunction(
+            self,
+            "reliability",
+            env_name=env_name,
+            component="reliability",
+            code=code,
+            secrets=(MIRROR_SECRET,),
+            parameters=("SAP_READ_BASE",),
+            timeout=Duration.minutes(5),
+        ).function
+        tables["analytics"].grant_read_write_data(reliability)
+        data.key.grant_decrypt(reliability)
+        events.Rule(
+            self,
+            "DailyReliabilityRefresh",
+            rule_name=f"aera-{env_name}-reliability-refresh",
+            schedule=events.Schedule.rate(Duration.days(1)),
+            targets=[
+                targets.LambdaFunction(
+                    reliability, retry_attempts=3, dead_letter_queue=dead_letters
+                )
+            ],
+        )
+        monitor = ServiceFunction(
+            self,
+            "monitor",
+            env_name=env_name,
+            component="monitor",
+            code=code,
+            secrets=(MIRROR_SECRET,),
+            parameters=("SAP_READ_BASE",),
+        ).function
+        for name in ("cases", "audit", "signals"):
+            tables[name].grant_read_write_data(monitor)
+        tables["idempotency"].grant_read_data(monitor)
+        data.bus.grant_put_events_to(monitor)
+        data.key.grant_encrypt_decrypt(monitor)
+        for name, fn, detail_type in (
+            ("Notifier", notifier, "NotificationRequested"),
+            ("SupplierDialogue", notifier, "SupplierInfoRequested"),
+            ("Monitor", monitor, "GoodsReceiptDue"),
+        ):
+            events.Rule(
+                self,
+                f"On{name}",
+                rule_name=f"aera-{env_name}-{name.lower()}",
+                event_bus=data.bus,
+                event_pattern=events.EventPattern(
+                    source=events.Match.prefix("aera."), detail_type=[detail_type]
+                ),
+                targets=[
+                    targets.LambdaFunction(fn, retry_attempts=8, dead_letter_queue=dead_letters)
+                ],
+            )
+        # Verifier and routing (SRD 6.6, 6.7): PlanProposed in; routes with its outbox out.
+        routing = ServiceFunction(
+            self, "routing", env_name=env_name, component="routing", code=code, parameters=()
+        ).function
+        for name in ("cases", "audit"):
+            tables[name].grant_read_write_data(routing)
+        tables["config"].grant_read_data(routing)
+        data.key.grant_encrypt_decrypt(routing)
+        routing.grant_invoke(scheduler_role)
+        verifier = ServiceFunction(
+            self,
+            "verifier",
+            env_name=env_name,
+            component="verifier",
+            code=code,
+            environment={
+                "AERA_APPROVAL_TIMER_ARN": routing.function_arn,
+                "AERA_SCHEDULER_ROLE_ARN": scheduler_role.role_arn,
+            },
+            secrets=(MIRROR_SECRET,),
+            parameters=(
+                "SAP_READ_BASE",
+                "GROUNDING_GUARDRAIL_ID",
+                "GROUNDING_GUARDRAIL_VERSION",
+                "REASONING_GUARDRAIL_ID",
+                "REASONING_GUARDRAIL_VERSION",
+                "REASONING_POLICY_ARN",
+            ),
+            timeout=Duration.seconds(60),
+            memory_mb=1024,
+        ).function
+        for name in ("cases", "audit"):
+            tables[name].grant_read_write_data(verifier)
+        # analytics: SAP-derived supplier reliability for the grounding source (ADR-0032).
+        for name in ("signals", "config", "ledger", "analytics"):
+            tables[name].grant_read_data(verifier)
+        data.bus.grant_put_events_to(verifier)
+        data.key.grant_encrypt_decrypt(verifier)
+        verifier.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:ApplyGuardrail"],
+                resources=[
+                    grounding_guardrail.attr_guardrail_arn,
+                    reasoning_guardrail.attr_guardrail_arn,
+                    reasoning_profile,
+                    # ADR-0030: the US guardrail profile may serve the call from another US
+                    # Region; IAM evaluates the same guardrail id and the profile there.
+                    self.format_arn(
+                        service="bedrock",
+                        region="us-*",
+                        resource="guardrail",
+                        resource_name=reasoning_guardrail.attr_guardrail_id,
+                    ),
+                    self.format_arn(
+                        service="bedrock",
+                        region="us-*",
+                        resource="guardrail-profile",
+                        resource_name=REASONING_PROFILE,
+                    ),
+                ],
+            )
+        )
+        # ADR-0030: a guardrail with an Automated Reasoning policy also checks that the caller
+        # may invoke that policy, in whichever US Region the guardrail profile serves it from.
+        policy_id = Fn.select(1, Fn.split("/", policy_arn))
+        regional_policy = self.format_arn(
+            service="bedrock",
+            region="us-*",
+            resource="automated-reasoning-policy",
+            resource_name=policy_id,
+        )
+        verifier.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeAutomatedReasoningPolicy"],
+                resources=[policy_arn, f"{policy_arn}:*", regional_policy, f"{regional_policy}:*"],
+            )
+        )
+        verifier.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["scheduler:CreateSchedule"],
+                resources=[
+                    self.format_arn(
+                        service="scheduler",
+                        resource="schedule",
+                        resource_name=f"default/aera-{env_name}-appr-*",
+                    )
+                ],
+            )
+        )
+        scheduler_role.grant_pass_role(verifier.grant_principal)
+        events.Rule(
+            self,
+            "OnPlanProposed",
+            rule_name=f"aera-{env_name}-verifier",
+            event_bus=data.bus,
+            event_pattern=events.EventPattern(
+                source=events.Match.prefix("aera."), detail_type=["PlanProposed"]
+            ),
+            targets=[
+                targets.LambdaFunction(verifier, retry_attempts=4, dead_letter_queue=dead_letters)
+            ],
+        )
+        self.state_machine = machine
+        self.execution_function = execution

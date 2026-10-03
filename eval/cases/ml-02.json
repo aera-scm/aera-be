@@ -1,0 +1,64 @@
+{
+  "id": "ml-02",
+  "category": "MULTILINGUAL",
+  "subsets": [
+    "ml"
+  ],
+  "description": "Indonesian WhatsApp photo: 620 units read at 71% and kept unconfirmed.",
+  "signals": [
+    "eval-multilingual"
+  ],
+  "plan": {
+    "options": [
+      {
+        "id": "B",
+        "name": "Alternate supplier",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "params": {
+          "supplierId": "1000871",
+          "qty": 800
+        }
+      },
+      {
+        "id": "C",
+        "name": "Transfer from 1020",
+        "actionType": "STO",
+        "params": {
+          "fromPlant": "1020",
+          "qty": 600
+        }
+      }
+    ],
+    "chosen": [
+      "C"
+    ],
+    "rationale": "SAP-backed donor transfer"
+  },
+  "truth": {
+    "accepted": [
+      "eval-multilingual"
+    ],
+    "extracted": {
+      "language": "id",
+      "QUANTITY": "620 unit:UNCONFIRMED"
+    },
+    "optionCosts": {
+      "B": 51900,
+      "C": 4100
+    },
+    "blocked": {
+      "B": [
+        "V-06"
+      ]
+    },
+    "tier": 1,
+    "status": "AUTO_APPROVED",
+    "acceptable": [
+      [
+        "STO"
+      ]
+    ]
+  },
+  "multilingualLanguage": "id",
+  "multilingualQuantity": 620
+}

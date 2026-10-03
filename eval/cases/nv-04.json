@@ -1,0 +1,85 @@
+{
+  "id": "nv-04",
+  "category": "NO_VIABLE_OPTION",
+  "subsets": [
+    "extended"
+  ],
+  "description": "Donor stock 320 is below cover; unapproved alternate cannot route.",
+  "mirror": [
+    {
+      "entity": "A_MatlStkInAcctMod",
+      "where": {
+        "Material": "MAT-48219",
+        "Plant": "1020",
+        "InventoryStockType": "01"
+      },
+      "set": {
+        "MatlWrhsStkQtyInMatlBaseUnit": "320"
+      }
+    }
+  ],
+  "signals": [
+    "email-01",
+    "whatsapp-01",
+    "carrier-01"
+  ],
+  "plan": {
+    "options": [
+      {
+        "id": "A",
+        "name": "Air freight partial",
+        "actionType": "AIR_FREIGHT",
+        "qtyField": {
+          "signal": "whatsapp-01",
+          "field": "QUANTITY"
+        }
+      },
+      {
+        "id": "B",
+        "name": "Alternate supplier",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "params": {
+          "supplierId": "1000871",
+          "qty": 800
+        }
+      },
+      {
+        "id": "C",
+        "name": "Transfer from 1020",
+        "actionType": "STO",
+        "params": {
+          "fromPlant": "1020",
+          "qty": 600
+        }
+      }
+    ],
+    "chosen": [
+      "B"
+    ],
+    "rationale": "Alternate supplier for the full quantity.",
+    "confirm": [
+      {
+        "signal": "whatsapp-01",
+        "field": "QUANTITY"
+      }
+    ],
+    "recovery": {
+      "signal": "carrier-01",
+      "field": "ETA"
+    }
+  },
+  "truth": {
+    "refused": [
+      "C"
+    ],
+    "blocked": {
+      "B": [
+        "V-06"
+      ]
+    },
+    "tier": 3,
+    "reason": "BLOCKING_CHECK",
+    "status": "ESCALATED",
+    "released": 0
+  }
+}

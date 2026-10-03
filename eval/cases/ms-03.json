@@ -1,0 +1,84 @@
+{
+  "id": "ms-03",
+  "category": "MATERIAL_SHORTAGE",
+  "subsets": [
+    "ci"
+  ],
+  "description": "Donor 1020 holds 400 PC, below its own cover: the transfer is refused.",
+  "mirror": [
+    {
+      "entity": "A_MatlStkInAcctMod",
+      "where": {
+        "Material": "MAT-48219",
+        "Plant": "1020",
+        "InventoryStockType": "01"
+      },
+      "set": {
+        "MatlWrhsStkQtyInMatlBaseUnit": "400"
+      }
+    }
+  ],
+  "signals": [
+    "email-01",
+    "whatsapp-01",
+    "carrier-01"
+  ],
+  "plan": {
+    "options": [
+      {
+        "id": "A",
+        "name": "Air freight partial",
+        "actionType": "AIR_FREIGHT",
+        "qtyField": {
+          "signal": "whatsapp-01",
+          "field": "QUANTITY"
+        }
+      },
+      {
+        "id": "B",
+        "name": "Alternate supplier",
+        "actionType": "ALTERNATE_SUPPLIER",
+        "params": {
+          "supplierId": "1000871",
+          "qty": 800
+        }
+      },
+      {
+        "id": "C",
+        "name": "Transfer from 1020",
+        "actionType": "STO",
+        "params": {
+          "fromPlant": "1020",
+          "qty": 600
+        }
+      }
+    ],
+    "chosen": [
+      "A"
+    ],
+    "rationale": "Air freight the confirmed partial.",
+    "confirm": [
+      {
+        "signal": "whatsapp-01",
+        "field": "QUANTITY"
+      }
+    ],
+    "recovery": {
+      "signal": "carrier-01",
+      "field": "ETA"
+    }
+  },
+  "truth": {
+    "refused": [
+      "C"
+    ],
+    "blocked": {
+      "B": [
+        "V-06"
+      ]
+    },
+    "tier": 2,
+    "status": "AWAITING_APPROVAL",
+    "released": 0
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "app": "uv run --locked python -m infra.app",
+  "context": {}
+}

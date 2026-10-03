@@ -10,7 +10,7 @@ is taken from the agent's text.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -27,7 +27,9 @@ def _time(value: Any) -> str:
         value = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if not isinstance(value, datetime):
         return str(value)
-    return f"{value:%Y-%m-%dT%H:%M} UTC ({value:%H:%M} on {value:%b} {value.day})"
+    # The tools' own form (what the model copies) first, then the reading form.
+    moment = value.astimezone(UTC)
+    return f"{moment:%Y-%m-%dT%H:%M:%S}Z ({moment:%H:%M} UTC on {moment:%b} {moment.day})"
 
 
 def _number(value: Any) -> str:
@@ -160,7 +162,7 @@ def render(
         history = (
             "has recent SAP delivery history"
             if profile_for(ctx, supplier_id, case.material)
-            else "has no recent SAP delivery history"
+            else "has no recent SAP delivery history (NO_RECENT_SAP_HISTORY)"
         )
         lines.append(
             f"Supplier {supplier_id} ({record.get('SupplierName') or 'name not in master data'}) "

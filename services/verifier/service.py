@@ -93,11 +93,15 @@ class VerifierService:
         for key in ("PK", "SK"):
             item.pop(key, None)
         record = PlanRecord.model_validate(item)
+        # One verification moment: every re-read, projection and cover window is measured
+        # from the same instant, so a boundary case (donor left at exactly its minimum
+        # cover) does not fail on milliseconds between two clock readings (V-07).
+        moment = self.clock()
         ctx = ToolContext(
             sap=self.sap,
             dynamodb=self.dynamodb,
             bus=self.bus,
-            clock=self.clock,
+            clock=lambda: moment,
             env=self.env,
             actor="verifier",
         )
@@ -108,7 +112,7 @@ class VerifierService:
         verification = verify(
             record.plan,
             facts.evidence,
-            now=self.clock(),
+            now=moment,
             grounding=self.grounding(rationale, facts.source, query),
             corroboration=facts.corroboration,
             proposed_at=record.proposed_at,

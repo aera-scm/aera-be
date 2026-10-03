@@ -18,6 +18,8 @@ ONE = Decimal(1)
 ACTION: TypeAdapter[Action] = TypeAdapter(Action)
 REVERSIBLE = frozenset({"CREATE_STO", "CHANGE_PO_DATE", "SPLIT_PO_SCHEDULE_LINE"})
 CHECK_IDS = frozenset(f"V-{index:02d}" for index in range(1, 14))
+# V-10: how long an option's priced arrival stays valid before it must be re-priced (ADR-0029).
+PRICE_MAX_AGE = timedelta(minutes=15)
 
 
 def plan_hash(plan: ProposedPlan) -> str:
@@ -81,6 +83,9 @@ class OptionEvidence:
     unconfirmed_fields: tuple[str, ...] = ()
     calendar_feasible: bool = False
     cancellation_fee: Decimal = ZERO
+    # The clock the option was priced at (its `calc_option` draft); V-10 measures the lead
+    # time from here. None means "priced now".
+    priced_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -209,6 +214,7 @@ def verify(
     proposed_at: datetime,
     minimum_cover: Decimal = Decimal("2"),
     max_age: timedelta = timedelta(seconds=60),
+    max_price_age: timedelta = PRICE_MAX_AGE,
 ) -> Verification:
     if not aware(now) or not finite(minimum_cover) or max_age <= timedelta(0):
         raise ValueError("invalid verifier clock or cover policy")
@@ -368,8 +374,17 @@ def verify(
                 option.id,
             )
         )
-        feasible = finite(facts.lead_hours) and facts.calendar_feasible and aware(option.arrival)
-        feasible = feasible and option.arrival >= now + timedelta(hours=float(facts.lead_hours))
+        # ADR-0029: the arrival was computed when the option was priced, so the lead time is
+        # measured from that moment; a price older than PRICE_MAX_AGE is no longer feasible.
+        priced = facts.priced_at or now
+        feasible = (
+            finite(facts.lead_hours)
+            and facts.calendar_feasible
+            and aware(option.arrival)
+            and aware(priced)
+            and timedelta(0) <= now - priced <= max_price_age
+        )
+        feasible = feasible and option.arrival >= priced + timedelta(hours=float(facts.lead_hours))
         checks.append(_check("V-10", feasible, "Lead time and calendar feasible", option.id))
         checks.append(
             _check(

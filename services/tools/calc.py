@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
@@ -219,7 +220,10 @@ def draft_key(cost: Any, coverage: Any, cost_ref: str) -> str:
 def calc_option(
     ctx: ToolContext, case_id: str, action_type: str, params: dict[str, Any]
 ) -> dict[str, Any]:
-    draft, _ = compute_option(ctx, case_id, action_type, params)
+    # One pricing moment: the Verifier recalculates the option at `createdAt`, so it must be
+    # the clock the arrival was computed from, not a later reading (V-01, V-04, V-10).
+    priced_at = ctx.now()
+    draft, _ = compute_option(replace(ctx, clock=lambda: priced_at), case_id, action_type, params)
     ctx.dynamodb.put_item(
         TableName=table_name("cases", ctx.env),
         Item=to_item(
@@ -230,7 +234,7 @@ def calc_option(
                 **jsonable(draft),
                 # What the Verifier needs to recalculate the option independently.
                 "params": jsonable(params),
-                "createdAt": ctx.now().isoformat(),
+                "createdAt": priced_at.isoformat(),
             }
         ),
     )

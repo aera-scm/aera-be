@@ -5,7 +5,10 @@ The agent's part is played by the real tools: options come from `calc_option` an
 from `propose_plan`. Only the Guardrail grounding score is supplied by the test.
 """
 
+import itertools
 import json
+from dataclasses import replace
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -269,3 +272,22 @@ def test_at_16_a_stale_approval_is_refused_with_the_current_plan(
     assert stale["statusCode"] == 409
     assert json.loads(stale["body"])["currentPlanVersionHash"] == current
     assert planner["statusCode"] == 403
+
+
+def test_fr_ver_01_reference_plan_verifies_on_a_running_clock(
+    ctx: ToolContext,  # noqa: F811
+    photo: Signal,  # noqa: F811
+    verifier: VerifierService,
+) -> None:
+    """A deployed clock moves between reads: the agent prices options over several
+    milliseconds and the Verifier runs minutes later. Neither may fail V-01, V-04, V-07 or
+    V-10 on a plan whose sources did not change."""
+    ticks = itertools.count()
+    agent = replace(ctx, clock=lambda: T0 + timedelta(milliseconds=next(ticks)))
+    propose(agent, photo, ["C", "A"])
+    later = replace(verifier, clock=lambda: T0 + timedelta(minutes=2, milliseconds=next(ticks)))
+
+    result = later.handle(CASE, 1)
+
+    assert failed(ctx) == {"V-06/B"}
+    assert result["tier"] == 2

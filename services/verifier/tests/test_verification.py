@@ -184,6 +184,31 @@ def test_checks_fail_closed(check: str, changes: dict[str, Any]) -> None:
     assert routed(result).tier == 3
 
 
+def v10(minutes_later: int, priced_at: datetime) -> bool:
+    """V-10 on option C (5 h lead, arrival NOW + 5 h), verified some minutes after NOW."""
+    plan, facts = reference()
+    now = NOW + timedelta(minutes=minutes_later)
+    facts = {oid: replace(f, read_at=now, priced_at=priced_at) for oid, f in facts.items()}
+    result = verify(
+        plan,
+        facts,
+        now=now,
+        proposed_at=NOW,
+        grounding=Grounding(D("0.9"), D("0.9"), True),
+        corroboration=Corroboration(mrp_verified=True),
+    )
+    return next(
+        c for c in result.record.checks if c.check_id == "V-10" and c.option_id == "C"
+    ).passed
+
+
+def test_V_10_lead_time_is_measured_from_the_pricing_moment() -> None:
+    assert v10(2, NOW)  # priced two minutes ago, arrival = priced + lead
+    assert not v10(16, NOW)  # price older than 15 minutes must be re-priced (ADR-0029)
+    assert not v10(2, NOW + timedelta(minutes=1))  # arrival earlier than the lead allows
+    assert not v10(2, NOW + timedelta(minutes=3))  # priced in the future
+
+
 def test_V_02_integer_positive_and_coverage_flags() -> None:
     plan, facts = reference()
     action = plan.options[2].actions[0]

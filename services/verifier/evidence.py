@@ -288,6 +288,7 @@ class EvidenceReader:
             # The rate card's lead time is the lane's calendar; a lane without a valid entry
             # cannot be recalculated and has no evidence at all.
             calendar_feasible=True,
+            priced_at=source.at,
         )
 
     def gather(

@@ -21,7 +21,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from services.rules.br_04 import PartnerContact, rejection_reason, verify_sender
+from services.rules.br_04 import (
+    PartnerContact,
+    rejection_reason,
+    verify_sender,
+    with_phone_standins,
+)
 from services.shared.audit import AuditWriter
 from services.shared.models import Signal, SignalChannel, SignalStatus
 from services.shared.quarantine import quarantine
@@ -206,7 +211,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         _gatekeeper = Gatekeeper(
             signals=SignalStore(dynamodb),
             raw=RawStore(runtime.client("s3"), runtime.raw_bucket()),
-            contacts=directory.contacts,
+            # ADR-0037: team phones standing in for SAP supplier numbers come from the secret.
+            contacts=lambda: with_phone_standins(
+                directory.contacts(),
+                dict(runtime.secret("channels/whatsapp").get("standins") or {}),
+            ),
             guardrail=Guardrail(
                 runtime.client("bedrock-runtime"),
                 lambda: runtime.parameter("GUARDRAIL_ID"),

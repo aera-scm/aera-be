@@ -72,8 +72,13 @@ class BedrockLocator:
         blocks = response.get("output", {}).get("message", {}).get("content", [])
         if len(blocks) != 1 or not isinstance(blocks[0].get("text"), str):
             return {}
+        text = blocks[0]["text"].strip()
+        # Models often wrap JSON in a Markdown code fence; only the fence is removed.
+        if text.startswith("```") and text.endswith("```"):
+            text = text[3:-3].strip()
+            text = text[4:].lstrip() if text.lower().startswith("json") else text
         try:
-            data = json.loads(blocks[0]["text"])
+            data = json.loads(text)
         except (ValueError, TypeError):
             return {}
         if not isinstance(data, dict):

@@ -12,7 +12,7 @@
 import json
 from typing import Any
 
-from aws_cdk import Duration, Stack
+from aws_cdk import Duration, Fn, Stack
 from aws_cdk import aws_bedrock as bedrock
 from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
@@ -411,11 +411,18 @@ class ControlStack(Stack):
             )
         )
         # ADR-0030: a guardrail with an Automated Reasoning policy also checks that the caller
-        # may invoke that policy.
+        # may invoke that policy, in whichever US Region the guardrail profile serves it from.
+        policy_id = Fn.select(1, Fn.split("/", policy_arn))
+        regional_policy = self.format_arn(
+            service="bedrock",
+            region="us-*",
+            resource="automated-reasoning-policy",
+            resource_name=policy_id,
+        )
         verifier.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeAutomatedReasoningPolicy"],
-                resources=[policy_arn, f"{policy_arn}:*"],
+                resources=[policy_arn, f"{policy_arn}:*", regional_policy, f"{regional_policy}:*"],
             )
         )
         verifier.add_to_role_policy(

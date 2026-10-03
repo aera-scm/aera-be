@@ -106,8 +106,13 @@ def assess(
             if payload is not None
         )
     except ClientError as error:
-        code = error.response.get("Error", {}).get("Code", "unknown")
-        LOG.warning("Automated Reasoning check unavailable: %s", code)
+        detail = error.response.get("Error", {})
+        # The service message names the denied action and resource; never the statements.
+        LOG.warning(
+            "Automated Reasoning check unavailable: %s %s",
+            detail.get("Code", "unknown"),
+            str(detail.get("Message", ""))[:500],
+        )
         return PolicyAssessment("UNAVAILABLE", statements, (), policy_arn)
     except (BotoCoreError, KeyError, TypeError, ValueError) as error:
         LOG.warning("Automated Reasoning check unavailable: %s", type(error).__name__)

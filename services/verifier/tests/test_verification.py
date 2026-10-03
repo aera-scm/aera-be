@@ -209,6 +209,32 @@ def test_V_10_lead_time_is_measured_from_the_pricing_moment() -> None:
     assert not v10(2, NOW + timedelta(minutes=3))  # priced in the future
 
 
+def test_FR_VER_02_failed_checks_name_their_reason() -> None:
+    plan, facts = reference()
+    facts["C"] = replace(
+        facts["C"],
+        donors={("M1", "1020"): Donor(D(1000), D(100), D(0), D(1000))},
+        reread={},
+    )
+    checks = {
+        c.check_id: c.detail
+        for c in verified(plan, facts).record.checks
+        if c.option_id == "C" and not c.passed
+    }
+    assert "costUsd 4100 differs from re-read nothing" in checks["V-01"]
+    assert "donor 1020: 400 left after the transfer, minimum cover needs 4800" in checks["V-07"]
+    late = verify(
+        plan,
+        {oid: replace(f, read_at=NOW + timedelta(minutes=20)) for oid, f in reference()[1].items()},
+        now=NOW + timedelta(minutes=20),
+        proposed_at=NOW,
+        grounding=Grounding(D("0.9"), D("0.9"), True),
+        corroboration=Corroboration(mrp_verified=True),
+    )
+    [v10] = [c for c in late.record.checks if c.check_id == "V-10" and c.option_id == "C"]
+    assert not v10.passed and "earliest with 5 h lead" in v10.detail
+
+
 def test_V_02_integer_positive_and_coverage_flags() -> None:
     plan, facts = reference()
     action = plan.options[2].actions[0]

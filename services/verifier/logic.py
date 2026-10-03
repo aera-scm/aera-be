@@ -197,11 +197,41 @@ def _donor_ok(donor: Donor | None, quantity: Decimal, minimum_cover: Decimal) ->
 
 
 def _check(
-    check_id: str, passed: bool, detail: str, option_id: str | None, blocking: bool = True
+    check_id: str,
+    passed: bool,
+    detail: str,
+    option_id: str | None,
+    blocking: bool = True,
+    reason: str = "",
 ) -> CheckResult:
+    """A failed check names its reason after the rule (FR-VER-02)."""
+    if not passed and reason:
+        detail = f"{detail}: {reason}"
     return CheckResult(
         check_id=check_id, passed=passed, blocking=blocking, option_id=option_id, detail=detail
     )
+
+
+def _donor_reason(donor: Donor | None, quantity: Decimal, minimum_cover: Decimal) -> str:
+    if donor is None:
+        return "donor stock could not be re-read"
+    left = donor.on_hand - quantity
+    floor = donor.consumption_per_hour * 24 * minimum_cover
+    problems = []
+    if left < floor:
+        problems.append(f"{left} left after the transfer, minimum cover needs {floor}")
+    if left < donor.customer_commitments:
+        problems.append(f"{left} left, confirmed commitments need {donor.customer_commitments}")
+    if (
+        donor.projected_stockout is not None
+        and donor.cover_until is not None
+        and donor.projected_stockout < donor.cover_until
+    ):
+        problems.append(
+            f"projected stock-out {donor.projected_stockout.isoformat()} before the cover "
+            f"window ends {donor.cover_until.isoformat()}"
+        )
+    return "; ".join(problems) or "donor figures are not finite"
 
 
 def verify(
@@ -257,9 +287,34 @@ def verify(
             and option.coverage_units == facts.expected_coverage
             and option.arrival == facts.expected_arrival
         )
+        problems = [] if option.figures else ["option has no figures"]
+        problems += [
+            f"{figure.name} {figure.value} differs from re-read "
+            f"{facts.reread.get((figure.source_ref, figure.name), 'nothing')}"
+            for figure in option.figures
+            if facts.reread.get((figure.source_ref, figure.name)) != figure.value
+        ]
+        problems += [
+            f"figure {name} missing or not equal to the option"
+            for name, value in required.items()
+            if figure_values.get(name) != value
+        ]
+        problems += [
+            f"{name} {given} differs from recalculated {expected}"
+            for name, given, expected in (
+                ("costUsd", option.cost_usd, facts.expected_cost),
+                ("coverageUnits", option.coverage_units, facts.expected_coverage),
+                ("arrival", option.arrival, facts.expected_arrival),
+            )
+            if given != expected
+        ]
         checks.append(
             _check(
-                "V-01", source_ok, "Figures and recalculated values match fresh sources", option.id
+                "V-01",
+                source_ok,
+                "Figures and recalculated values match fresh sources",
+                option.id,
+                reason="; ".join(problems) or "cost figure does not cite the cost source",
             )
         )
         quantities = _quantities(option)
@@ -276,7 +331,11 @@ def verify(
                 else "Quantity within need"
             )
         )
-        checks.append(_check("V-02", valid_qty, flag, option.id))
+        checks.append(
+            _check(
+                "V-02", valid_qty, flag, option.id, reason="quantities must be positive integers"
+            )
+        )
         future = aware(option.arrival) and option.arrival > now
         dates = [
             action.delivery_date for action in option.actions if hasattr(action, "delivery_date")
@@ -300,6 +359,9 @@ def verify(
                 future and aware(facts.need_at),
                 "Late arrival; partial coverage requires review" if late else "Arrival before need",
                 option.id,
+                reason="arrival or a delivery date is not in the future"
+                if aware(facts.need_at)
+                else "need date unknown",
             )
         )
         try:
@@ -313,12 +375,24 @@ def verify(
             )
         except (ValidationError, ValueError):
             valid_actions = False
+            expected = []
+        given = [action.model_dump(mode="json") for action in option.actions]
+        recalculated = [action.model_dump(mode="json") for action in expected]
+        differences = [
+            f"{key} {one.get(key)} differs from recalculated {other.get(key)}"
+            for one, other in zip(given, recalculated, strict=False)
+            for key in sorted(set(one) | set(other))
+            if one.get(key) != other.get(key)
+        ]
+        if len(given) != len(recalculated):
+            differences.append(f"{len(given)} actions, recalculation has {len(recalculated)}")
         checks.append(
             _check(
                 "V-04",
                 valid_actions and bool(expected if valid_actions else []),
                 "Allowlisted action parameters match independent calculation",
                 option.id,
+                reason="; ".join(differences[:5]) or "action parameters incomplete or invalid",
             )
         )
         masters = facts.plant in facts.plants
@@ -334,13 +408,34 @@ def verify(
                 masters = (
                     masters and action.plant == facts.plant and action.material == facts.material
                 )
-        checks.append(_check("V-05", masters, "Supplier and plant master data verified", option.id))
+        checks.append(
+            _check(
+                "V-05",
+                masters,
+                "Supplier and plant master data verified",
+                option.id,
+                reason="a supplier, plant or material is missing, blocked or not the case's",
+            )
+        )
         compliance = all(
             facts.compliance.get(action.supplier_id) == "APPROVED"
             for action in option.actions
             if action.type == "CREATE_PO_ALTERNATE"
         )
-        checks.append(_check("V-06", compliance, "Alternate supplier must be APPROVED", option.id))
+        statuses = ", ".join(
+            f"{action.supplier_id} is {facts.compliance.get(action.supplier_id) or 'unknown'}"
+            for action in option.actions
+            if action.type == "CREATE_PO_ALTERNATE"
+        )
+        checks.append(
+            _check(
+                "V-06",
+                compliance,
+                "Alternate supplier must be APPROVED",
+                option.id,
+                reason=statuses,
+            )
+        )
         transfers = _transfers([option])
         checks.append(
             _check(
@@ -351,6 +446,12 @@ def verify(
                 ),
                 "Donor cover and confirmed customer orders protected",
                 option.id,
+                reason="; ".join(
+                    f"donor {plant}: "
+                    + _donor_reason(facts.donors.get((material, plant)), qty, minimum_cover)
+                    for (material, plant), qty in transfers.items()
+                    if not _donor_ok(facts.donors.get((material, plant)), qty, minimum_cover)
+                ),
             )
         )
         checks.append(
@@ -362,6 +463,12 @@ def verify(
                 ),
                 "Ledger dry run has sufficient unreserved stock",
                 option.id,
+                reason="; ".join(
+                    f"donor {plant} has "
+                    f"{facts.donors[(m, plant)].unreserved if (m, plant) in facts.donors else 0}"
+                    f" unreserved, transfer needs {qty}"
+                    for (m, plant), qty in transfers.items()
+                ),
             )
         )
         checks.append(
@@ -372,6 +479,7 @@ def verify(
                 and option.cost_usd < facts.rar_protected,
                 "Cost must be lower than protected revenue",
                 option.id,
+                reason=f"cost {option.cost_usd} USD, protected revenue {facts.rar_protected} USD",
             )
         )
         # ADR-0029: the arrival was computed when the option was priced, so the lead time is
@@ -385,13 +493,28 @@ def verify(
             and timedelta(0) <= now - priced <= max_price_age
         )
         feasible = feasible and option.arrival >= priced + timedelta(hours=float(facts.lead_hours))
-        checks.append(_check("V-10", feasible, "Lead time and calendar feasible", option.id))
+        lead = facts.lead_hours if finite(facts.lead_hours) else ZERO
+        earliest = priced + timedelta(hours=float(lead))
+        checks.append(
+            _check(
+                "V-10",
+                feasible,
+                "Lead time and calendar feasible",
+                option.id,
+                reason=f"priced {priced.isoformat()}, verified {now.isoformat()} "
+                f"(at most {int(max_price_age.total_seconds() // 60)} min old); arrival "
+                f"{option.arrival.isoformat()}, earliest with {facts.lead_hours} h lead "
+                f"{earliest.isoformat()}",
+            )
+        )
         checks.append(
             _check(
                 "V-11",
                 facts.recipients <= facts.allowed_recipients,
                 "Recipients must belong to case master-data allowlist",
                 option.id,
+                reason=f"{len(facts.recipients - facts.allowed_recipients)} address(es) "
+                "outside master data",
             )
         )
         checks.append(
@@ -400,6 +523,7 @@ def verify(
                 not facts.unconfirmed_fields,
                 "No UNCONFIRMED critical field may be used",
                 option.id,
+                reason="unconfirmed: " + ", ".join(facts.unconfirmed_fields),
             )
         )
         checks.append(

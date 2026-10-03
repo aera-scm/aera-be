@@ -242,3 +242,25 @@ def test_replay_media_reads_recorded_images_from_the_raw_bucket(s3: Any) -> None
         media.fetch("900000000000002")
     with pytest.raises(ValueError):
         media.fetch("../secrets")
+
+
+def test_ir_07_replay_deployments_still_download_real_phone_media(s3: Any) -> None:
+    """A dev deployment replays recorded images and also takes photos from a real phone
+    (AT-23, FR-LAB-02): a media id without a recorded image is fetched from the Graph API."""
+    from services.webhooks.handler import ReplayMedia, ReplayThenGraph
+
+    class Graph:
+        def __init__(self) -> None:
+            self.asked: list[str] = []
+
+        def fetch(self, media_id: str) -> tuple[bytes, str]:
+            self.asked.append(media_id)
+            return b"jpeg", "image/jpeg"
+
+    s3.put_object(Bucket=RAW_BUCKET, Key="replay-media/900000000000001.png", Body=b"png")
+    graph = Graph()
+    media = ReplayThenGraph(ReplayMedia(RawStore(s3, RAW_BUCKET)), graph)
+
+    assert media.fetch("900000000000001") == (b"png", "image/png")
+    assert media.fetch("1234567890") == (b"jpeg", "image/jpeg")
+    assert graph.asked == ["1234567890"]

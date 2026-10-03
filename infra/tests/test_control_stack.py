@@ -258,6 +258,14 @@ def test_adr_0026_only_the_reasoning_guardrail_uses_the_us_guardrail_profile(
     assert any(
         ":guardrail-profile/us.guardrail.v1:0" in json.dumps(s["Resource"]) for s in statements
     )
+    # ADR-0030: the profile may route to another US Region; the same guardrail id is allowed
+    # there and nothing broader.
+    resources = json.dumps([s["Resource"] for s in statements])
+    assert (
+        '":bedrock:*:"' in resources
+        and '":guardrail/", {"Fn::GetAtt": ["ReasoningGuardrail", "GuardrailId"]}' in resources
+    )
+    assert '":bedrock:*:", {"Ref": "AWS::AccountId"}, ":guardrail/*"' not in resources
 
 
 def test_adr_0026_input_guardrail_stays_in_region() -> None:

@@ -371,6 +371,14 @@ class ControlStack(Stack):
                     self.format_arn(service="bedrock", resource="guardrail/*"),
                     reasoning_guardrail.attr_guardrail_arn,
                     reasoning_profile,
+                    # ADR-0030: the US guardrail profile may serve the call from another US
+                    # Region; IAM evaluates the same guardrail id there.
+                    self.format_arn(
+                        service="bedrock",
+                        region="*",
+                        resource="guardrail",
+                        resource_name=reasoning_guardrail.attr_guardrail_id,
+                    ),
                 ],
             )
         )

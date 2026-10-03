@@ -1,7 +1,15 @@
-"""FR-VER-04: second policy check of deterministic approval claims."""
+"""FR-VER-04: second policy check of deterministic approval claims.
+
+The plan's decisive facts go to the guardrail as premises (`query`) and the proposed tier as
+the one claim (`guard_content`), so the policy answers one question: may this plan take this
+tier? `SATISFIABLE` means the tier is allowed by the facts (agreement); `INVALID` means the
+facts forbid it (disagreement). Only facts the policy has variables for are sent; anything
+else makes the service return no finding at all (ADR-0030).
+"""
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,6 +17,9 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from services.routing.logic import Policy, Route
 from services.verifier.logic import Verification, is_reversible
+
+LOG = logging.getLogger(__name__)
+AGREEING = frozenset({"VALID", "SATISFIABLE"})
 
 
 @dataclass(frozen=True)
@@ -26,6 +37,14 @@ class PolicyAssessment:
 def decisive_statements(
     verified: Verification, proposed: Route, policy: Policy | None = None
 ) -> str:
+    premises, claim = decisive_facts(verified, proposed, policy)
+    return f"{premises}\n{claim}"
+
+
+def decisive_facts(
+    verified: Verification, proposed: Route, policy: Policy | None = None
+) -> tuple[str, str]:
+    """(premises, claim): one English sentence per policy variable, then the tier."""
     plan = verified.record.plan
     options = {option.id: option for option in plan.options}
     policy = policy or Policy()
@@ -42,8 +61,7 @@ def decisive_statements(
         (verified.evidence[oid].rar_protected for oid in plan.chosen if oid in verified.evidence),
         default=0,
     )
-    lines = [
-        f"Case {plan.case_id}. The proposed autonomy tier is {proposed.tier}.",
+    premises = [
         f"Total chosen action cost in US cents is {int(plan.total_cost_usd * 100)}.",
         f"The Tier 1 auto limit in US cents is {int(policy.auto_limit * 100)}.",
         f"Verifier confidence percent is {int(verified.confidence_for(tuple(plan.chosen)) * 100)}.",
@@ -52,27 +70,7 @@ def decisive_statements(
         f"Donor cover and customer commitments check V-07 {'passed' if donor_ok else 'failed'}.",
         f"Revenue at risk protected by the chosen plan in US cents is {int(protected * 100)}.",
     ]
-    for option_id in plan.chosen:
-        option = options[option_id]
-        facts = verified.evidence.get(option_id)
-        if facts is None:
-            lines.append(f"Option {option_id} lacks fresh source evidence.")
-            continue
-        reversibility = "reversible" if is_reversible(option, facts) else "irreversible"
-        lines.extend(
-            [
-                f"Option {option_id} costs USD {option.cost_usd}.",
-                f"Option {option_id} is {reversibility}.",
-                f"Option {option_id} protects USD {facts.rar_protected} revenue at risk.",
-            ]
-        )
-        for (material, plant), donor in sorted(facts.donors.items()):
-            lines.append(
-                f"Donor plant {plant} material {material} has {donor.on_hand} units, "
-                f"{donor.unreserved} unreserved units, and {donor.customer_commitments} "
-                "units of customer commitments."
-            )
-    return "\n".join(lines)
+    return "\n".join(premises), f"The proposed autonomy tier is {proposed.tier}."
 
 
 def assess(
@@ -84,8 +82,10 @@ def assess(
     proposed: Route,
     policy: Policy | None = None,
 ) -> PolicyAssessment:
-    statements = decisive_statements(verified, proposed, policy)
+    premises, claim = decisive_facts(verified, proposed, policy)
+    statements = f"{premises}\n{claim}"
     if not guardrail_id or not version or not policy_arn:
+        LOG.warning("Automated Reasoning check not configured")
         return PolicyAssessment("UNAVAILABLE", statements, (), policy_arn)
     try:
         response = client.apply_guardrail(
@@ -93,7 +93,10 @@ def assess(
             guardrailVersion=version,
             source="OUTPUT",
             outputScope="FULL",
-            content=[{"text": {"text": statements}}],
+            content=[
+                {"text": {"text": premises, "qualifiers": ["query"]}},
+                {"text": {"text": claim, "qualifiers": ["guard_content"]}},
+            ],
         )
         findings = tuple(
             str(kind).upper()
@@ -102,15 +105,23 @@ def assess(
             for kind, payload in finding.items()
             if payload is not None
         )
-    except (BotoCoreError, ClientError, KeyError, TypeError, ValueError):
+    except ClientError as error:
+        code = error.response.get("Error", {}).get("Code", "unknown")
+        LOG.warning("Automated Reasoning check unavailable: %s", code)
+        return PolicyAssessment("UNAVAILABLE", statements, (), policy_arn)
+    except (BotoCoreError, KeyError, TypeError, ValueError) as error:
+        LOG.warning("Automated Reasoning check unavailable: %s", type(error).__name__)
         return PolicyAssessment("UNAVAILABLE", statements, (), policy_arn)
     if not findings:
+        LOG.warning("Automated Reasoning check returned no finding")
         return PolicyAssessment("UNAVAILABLE", statements, (), policy_arn)
     status = (
         "INVALID"
         if any(kind in {"INVALID", "IMPOSSIBLE"} for kind in findings)
         else "VALID"
         if set(findings) == {"VALID"}
+        else "CONSISTENT"
+        if set(findings) <= AGREEING
         else "AMBIGUOUS"
     )
     return PolicyAssessment(status, statements, findings, policy_arn)

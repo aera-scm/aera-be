@@ -24,6 +24,7 @@ from infra.environments import require_deployable_environment
 from infra.stacks.data import DataStack
 
 MIRROR_SECRET = "sap/mirror-oauth-client"  # pragma: allowlist secret (a name, not a value)
+WHATSAPP_SECRET = "channels/whatsapp"  # pragma: allowlist secret (a name, not a value)
 
 
 class GateStack(Stack):
@@ -82,7 +83,9 @@ class GateStack(Stack):
         raw_bucket = data.buckets["raw"].bucket_name
         tables = data.tables
 
-        def function(component: str, **options: Any) -> lambda_.Function:
+        def function(
+            component: str, secrets: tuple[str, ...] = (MIRROR_SECRET,), **options: Any
+        ) -> lambda_.Function:
             service = ServiceFunction(
                 self,
                 component,
@@ -90,14 +93,15 @@ class GateStack(Stack):
                 component=component,
                 code=code,
                 environment={"AERA_RAW_BUCKET": raw_bucket},
-                secrets=(MIRROR_SECRET,),
+                secrets=secrets,
                 **options,
             )
             data.key.grant_encrypt_decrypt(service.function)
             data.bus.grant_put_events_to(service.function)
             return service.function
 
-        gatekeeper = function("gatekeeper")
+        # ADR-0037: the WhatsApp stand-in phones for BR-04 are read from the channel secret.
+        gatekeeper = function("gatekeeper", secrets=(MIRROR_SECRET, WHATSAPP_SECRET))
         extraction = function("extraction", timeout=Duration.seconds(60), memory_mb=1024)
         # One at a time on top of the transactional case opening. Lambda refuses any
         # reservation while the account limit is at its floor of 10, so it can be left out.
@@ -120,6 +124,16 @@ class GateStack(Stack):
             iam.PolicyStatement(
                 actions=["textract:AnalyzeDocument", "comprehend:DetectDominantLanguage"],
                 resources=["*"],
+            )
+        )
+        # FR-LNG-01, ADR-0038: the small model locates fields in Indonesian and German text,
+        # without tools; a value counts only if it appears verbatim in the Textract output.
+        extraction.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeModel"],
+                resources=[
+                    f"arn:{self.partition}:bedrock:{self.region}::foundation-model/amazon.nova-lite-*"
+                ],
             )
         )
         for fn in (extraction, mrp_poller):

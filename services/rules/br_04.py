@@ -44,6 +44,25 @@ def e164(sender: str) -> str | None:
     return f"+{digits}" if _PHONE.fullmatch(digits) else None
 
 
+def with_phone_standins(
+    contacts: Iterable[PartnerContact], standins: dict[str, str]
+) -> list[PartnerContact]:
+    """FR-COM-04, ADR-0037: a team-controlled phone may stand in for a phone number that SAP
+    master data holds for a partner, as the SES stand-in addresses do for email. A stand-in
+    whose SAP number belongs to no partner adds nothing."""
+    pairs = [(e164(team), e164(sap)) for team, sap in standins.items()]
+    known = [(team, sap) for team, sap in pairs if team and sap]
+    return [
+        PartnerContact(
+            contact.partner_id,
+            contact.kind,
+            contact.email_domains,
+            contact.phones | {team for team, sap in known if sap in contact.phones},
+        )
+        for contact in contacts
+    ]
+
+
 def verify_sender(
     channel: str, sender: str, contacts: Iterable[PartnerContact]
 ) -> PartnerContact | None:

@@ -224,6 +224,21 @@ class ReplayMedia:
         raise KeyError(f"no replay media for {media_id}")
 
 
+@dataclass
+class ReplayThenGraph:
+    """A replay deployment serves recorded images and still downloads the media of real
+    phones (AT-23, FR-LAB-02); posts are signed by Meta, so the media id comes from Meta."""
+
+    replay: ReplayMedia
+    graph: MediaFetcher
+
+    def fetch(self, media_id: str) -> tuple[bytes, str]:
+        try:
+            return self.replay.fetch(media_id)
+        except KeyError:
+            return self.graph.fetch(media_id)
+
+
 _webhooks: Webhooks | None = None
 
 
@@ -240,7 +255,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             token=lambda: runtime.secret("channels/whatsapp")["accessToken"]
         )
         if os.environ.get("AERA_WHATSAPP_MEDIA") == "replay":
-            media = ReplayMedia(raw)
+            media = ReplayThenGraph(ReplayMedia(raw), media)
         _webhooks = Webhooks(
             intake=Intake(
                 dynamodb=runtime.client("dynamodb"),

@@ -18,6 +18,7 @@ from seed_config import approver_items, config_items
 from services.api.handler import Api
 from services.conftest import RAW_BUCKET, RecordingBus
 from services.routing.store import ControlStore
+from services.shared.dynamo import to_item
 from services.shared.intake import Intake
 from services.shared.models import CaseStatus, Signal
 from services.shared.signals import RawStore
@@ -133,6 +134,33 @@ def test_at_05_at_29_reference_plan_c_plus_a_is_split_and_b_blocked_by_v06(
     assert request["data"]["templateId"] == "APPROVAL_REQUEST"
     assert {s["Name"].rsplit("-", 1)[1] for s in scheduler.created} == {"reminder", "deadline"}
     assert bus.details("PlanVerified")[0]["data"]["failedChecks"] == ["V-06/B"]
+
+
+def test_BR_23_a_re_verified_plan_goes_to_the_backup_approver(
+    ctx: ToolContext,  # noqa: F811
+    photo: Signal,  # noqa: F811
+    verifier: VerifierService,
+) -> None:
+    """ADR-0036: the approver who let an earlier version of the case expire is left out."""
+    ctx.dynamodb.put_item(
+        TableName="aera-test-cases",
+        Item=to_item(
+            {
+                "PK": f"CASE#{CASE}",
+                "SK": "PART#earlier",
+                "version": 0,
+                "expired": True,
+                "expiredApprover": "approver@meridian-motors.example",
+            }
+        ),
+    )
+    propose(ctx, photo, ["C", "A"])
+
+    verifier.handle(CASE, 1)
+
+    route = ControlStore(ctx.dynamodb, ENV).get(CASE, "ROUTE#1") or {}
+    pending = next(p for p in route["parts"] if p["tier"] == 2)
+    assert pending["approver"] == "backup.approver@meridian-motors.example"
 
 
 def test_fr_rte_01_sto_only_plan_of_usd_4100_is_tier_1(

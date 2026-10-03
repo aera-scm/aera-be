@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
@@ -186,7 +187,34 @@ def compute_impact(
     return result
 
 
-def _usable_quantity(ctx: ToolContext, case_id: str, field_id: str) -> tuple[Decimal, str]:
+# A supplier writes the unit with the number ("640 PC", "640 pcs"); only the order unit is read.
+_QUANTITY = re.compile(r"^\s*(\d[\d,]*(?:\.\d+)?)\s*([A-Za-z]{1,6})?\s*$")
+
+
+# Piece units: suppliers write PC or PCS; S/4 may return the internal code ST (Stueck) or EA.
+_PIECES = frozenset({"PC", "PCS", "PCE", "ST", "EA"})
+
+
+def _same_unit(written: str, unit: str | None) -> bool:
+    if unit is None:
+        return False
+    unit = unit.upper()
+    return written in {unit, unit + "S"} or (written in _PIECES and unit in _PIECES)
+
+
+def _quantity(value: str, unit: str | None) -> Decimal:
+    match = _QUANTITY.match(value)
+    written = match.group(2).upper() if match and match.group(2) else None
+    if match is None or (written is not None and not _same_unit(written, unit)):
+        raise ToolError(
+            f"quantity {value!r} is not a number in the order unit {unit or ''}".rstrip()
+        )
+    return decimal(match.group(1).replace(",", ""), "quantity")
+
+
+def _usable_quantity(
+    ctx: ToolContext, case_id: str, field_id: str, unit: str | None = None
+) -> tuple[Decimal, str]:
     for field in _fields(ctx, case_id):
         if field.field_id != field_id:
             continue
@@ -202,7 +230,7 @@ def _usable_quantity(ctx: ToolContext, case_id: str, field_id: str) -> tuple[Dec
             if field.confirmed_by
             else f"signal:{field.signal_id}/{field.name}"
         )
-        return decimal(field.value.replace(",", ""), "quantity"), reference
+        return _quantity(field.value, unit), reference
     raise ToolError(f"field {field_id} is not evidence of case {case_id}")
 
 
@@ -283,9 +311,10 @@ def compute_option(
             raise ToolError("air freight needs the case's purchase order")
         po = sap_get_purchase_order(ctx, case.po_number)
         supplier = str(params.get("supplierId") or po["supplier"])
+        item = next((i for i in po["items"] if i.get("material") == case.material), po["items"][0])
         field_id = params.get("qtyFieldId")
         if field_id:
-            qty, qty_ref = _usable_quantity(ctx, case_id, str(field_id))
+            qty, qty_ref = _usable_quantity(ctx, case_id, str(field_id), item.get("unit"))
         else:
             qty = decimal(params.get("qty"), "qty")
             qty_ref = str(params.get("qtySourceRef") or "")
@@ -297,7 +326,6 @@ def compute_option(
         rate = ctx.rates.find("AIR_FREIGHT", now.date(), supplier_id=supplier)
         if rate is None:
             raise ToolError(f"no air freight rate for supplier {supplier}")
-        item = next((i for i in po["items"] if i.get("material") == case.material), po["items"][0])
         arrival = now + timedelta(hours=float(rate.lead_time_hours))
         actions = [
             {

@@ -325,6 +325,45 @@ def test_fr_cht_02_planner_confirmed_quantity_is_cited_as_planner(
     assert [p["qty"] for p in split["parts"]] == [640, 960]
 
 
+@pytest.mark.parametrize("value", ["640 PC", "640 pcs", "640"])
+def test_br_02_a_confirmed_quantity_may_carry_the_order_unit(
+    ctx: ToolContext, carrier: Signal, value: str
+) -> None:
+    """Extraction keeps the unit the supplier wrote ("640 PC"); a planner may confirm it as is."""
+    record = signal(
+        ctx.dynamodb,
+        channel=SignalChannel.WHATSAPP,
+        text="PO 4500001234 - ready today",
+        fields=[("QUANTITY", value, 0.71, FieldStatus.UNCONFIRMED)],
+    )
+
+    option = calc.calc_option(
+        ctx,
+        CASE,
+        "AIR_FREIGHT",
+        {
+            "qtyFieldId": confirm(ctx, record),
+            "remainderAt": SEA_ETA.isoformat(),
+            "remainderSourceRef": f"signal:{carrier.signal_id}/ETA",
+        },
+    )
+
+    assert option["coverageUnits"] == 640
+
+
+@pytest.mark.parametrize("value", ["640 KG", "640 boxes", "about 640"])
+def test_br_02_a_quantity_in_another_unit_is_refused(ctx: ToolContext, value: str) -> None:
+    record = signal(
+        ctx.dynamodb,
+        channel=SignalChannel.WHATSAPP,
+        text="PO 4500001234 - ready today",
+        fields=[("QUANTITY", value, 0.71, FieldStatus.UNCONFIRMED)],
+    )
+
+    with pytest.raises(ToolError, match="quantity"):
+        calc.calc_option(ctx, CASE, "AIR_FREIGHT", {"qtyFieldId": confirm(ctx, record)})
+
+
 def test_alternate_supplier_option(ctx: ToolContext) -> None:
     option = calc.calc_option(
         ctx, CASE, "ALTERNATE_SUPPLIER", {"supplierId": "1000871", "qty": 800}
@@ -627,3 +666,49 @@ def test_fr_imp_03_every_emitted_source_reference_is_well_formed(
     ]
     for figure in figures:
         Figure.model_validate(figure)  # raises on a malformed sourceRef
+
+
+def test_srd_6_3_2_simulate_plan_says_what_is_wrong_with_an_option_id(ctx: ToolContext) -> None:
+    """Live 2026-10-03: the model sent id "OPT-A" and got an error without a reason, twice."""
+    result = BY_NAME["simulate_plan"].invoke(
+        ctx,
+        {
+            "caseId": CASE,
+            "options": [
+                {"id": "OPT-A", "actionType": "STO", "params": {"fromPlant": "1020", "qty": 600}}
+            ],
+        },
+    )
+
+    assert "one capital letter" in result["error"]
+
+
+def test_srd_6_3_2_invalid_tool_input_reaches_the_model_as_an_error() -> None:
+    from services.shared.models import Option
+    from services.tools.registry import ToolSpec
+
+    spec = ToolSpec(
+        "probe",
+        "",
+        {"value": {"type": "string"}},
+        (),
+        lambda ctx, value=None: {"option": Option.model_validate({"id": value}).id},
+    )
+
+    result = spec.invoke(None, {"value": "OPT-A"})  # type: ignore[arg-type]
+
+    assert result["error"].startswith("invalid input:")
+    assert "id" in result["error"]
+
+
+def test_srd_6_5_propose_plan_tells_the_model_the_plan_shape() -> None:
+    """Live 2026-10-03: plans with ids "OPT-A" and "chosenOptionIds" were refused twice."""
+    shape = BY_NAME["propose_plan"].properties["plan"]["description"]
+
+    assert all(word in shape for word in ('"chosen"', "one capital letter", "calc_option"))
+
+
+@pytest.mark.parametrize("unit", ["PC", "ST", "EA"])
+def test_br_02_a_piece_quantity_matches_any_piece_unit_code(unit: str) -> None:
+    """S/4 may return the internal code ST (Stueck) where a supplier writes PC."""
+    assert calc._quantity("640 PC", unit) == Decimal(640)

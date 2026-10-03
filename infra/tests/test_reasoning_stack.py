@@ -240,3 +240,18 @@ def test_srd_6_17_api_only_emits_and_starter_invokes_runtime(
             "ProtocolType": "MCP",
         },
     )
+
+
+@pytest.mark.parametrize("tool", ["calc_option", "simulate_plan", "get_supplier_reliability"])
+def test_fr_lrn_tools_that_price_options_read_supplier_reliability(
+    deployment: tuple[dict[str, assertions.Template], Path], tool: str
+) -> None:
+    """Live 2026-10-03: calc_option was denied GetItem on the analytics table (FR-LRN-02)."""
+    template = deployment[0]["reasoning"]
+    role = role_id(template, f"tool{tool.replace('_', '')}FunctionServiceRole")
+    reads = [
+        statement
+        for statement in statements(template, role)
+        if "dynamodb:GetItem" in actions(statement) and "analytics" in json.dumps(statement)
+    ]
+    assert reads

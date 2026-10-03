@@ -6,8 +6,9 @@ from typing import Any
 
 from services.routing.logic import Route, eligible
 from services.shared.audit import AuditWriter, TransactionConflictError
+from services.shared.cases import CaseStore, ConcurrentUpdateError, IllegalTransitionError
 from services.shared.dynamo import from_item, table_name, to_item
-from services.shared.models import ApproverLimit
+from services.shared.models import ApproverLimit, CaseStatus
 from services.verifier.logic import Verification, plan_hash
 
 
@@ -21,6 +22,7 @@ class ControlStore:
         self.table = table_name("cases", env)
         self.config = table_name("config", env)
         self.audit = AuditWriter(client, env)
+        self.cases = CaseStore(client, env)
 
     def get(self, case_id: str, sk: str) -> dict[str, Any] | None:
         item = self.client.get_item(
@@ -45,7 +47,36 @@ class ControlStore:
             put["ExpressionAttributeValues"] = to_item(values)
         return {"Put": put}
 
-    def limits(self) -> list[ApproverLimit]:
+    def parts(self, case_id: str) -> list[dict[str, Any]]:
+        args: dict[str, Any] = {
+            "TableName": self.table,
+            "ConsistentRead": True,
+            "KeyConditionExpression": "PK = :pk AND begins_with(SK, :part)",
+            "ExpressionAttributeValues": to_item({":pk": f"CASE#{case_id}", ":part": "PART#"}),
+        }
+        parts: list[dict[str, Any]] = []
+        while True:
+            page = self.client.query(**args)
+            parts.extend(from_item(item) for item in page.get("Items", []))
+            if "LastEvaluatedKey" not in page:
+                return parts
+            args["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+    def expired_pending(self, case_id: str, version: int) -> bool:
+        """BR-23: the current plan version has a Tier 2 part whose deadline passed undecided."""
+        return any(
+            part["version"] == version and part["expired"] and part.get("decision") is None
+            for part in self.parts(case_id)
+        )
+
+    def limits(self, case_id: str | None = None) -> list[ApproverLimit]:
+        """DR-12 approver limits. For a case, approvers who let one of its approvals expire
+        are left out, so the re-verified plan moves to a backup approver (BR-23, ADR-0036)."""
+        missed = (
+            {p["expiredApprover"] for p in self.parts(case_id) if p.get("expiredApprover")}
+            if case_id
+            else set()
+        )
         args: dict[str, Any] = {
             "TableName": self.config,
             "ConsistentRead": True,
@@ -61,7 +92,7 @@ class ControlStore:
                 data.pop("grantedAt", None)
                 limits.append(ApproverLimit.model_validate(data))
             if "LastEvaluatedKey" not in page:
-                return limits
+                return [limit for limit in limits if limit.user_id not in missed]
             args["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
     def save(
@@ -296,6 +327,14 @@ class ControlStore:
 
     def tick(self, case_id: str, part_id: str, *, now: datetime) -> None:
         part = self.get(case_id, f"PART#{part_id}")
+        if (
+            part is not None
+            and part["expired"]
+            and not part.get("approver")  # a None value is not stored
+            and not part.get("decision")
+        ):
+            self._escalate(case_id)  # a timer that stopped after expiring the part retries this
+            return
         if part is None or part["tier"] != 2 or part.get("decision") or part["expired"]:
             return
         deadline = datetime.fromisoformat(part["deadline"])
@@ -306,10 +345,15 @@ class ControlStore:
         if now >= deadline:
             backups = [
                 p.user_id
-                for p in eligible(self.limits(), part["plant"], part["cost"], now)
+                # Never back to an approver who already let this case's approval expire.
+                for p in eligible(self.limits(case_id), part["plant"], part["cost"], now)
                 if p.user_id != part["approver"]
             ]
-            changed.update(expired=True, approver=backups[0] if backups else None)
+            changed.update(
+                expired=True,
+                expiredApprover=part["approver"],
+                approver=backups[0] if backups else None,
+            )
             kind = "APPROVAL_EXPIRED"
             event_type = "CaseReadyForRun" if backups else "PlanRouted"
             data = {
@@ -343,3 +387,18 @@ class ControlStore:
             )
         except TransactionConflictError:
             return  # A concurrent timer or decision won; its durable state is authoritative.
+        if kind == "APPROVAL_EXPIRED" and not changed["approver"]:
+            self._escalate(case_id)
+
+    def _escalate(self, case_id: str) -> None:
+        """BR-23: no backup approver with a sufficient limit, so the case escalates."""
+        try:
+            self.cases.transition(
+                case_id,
+                CaseStatus.ESCALATED,
+                actor="system",
+                reason="APPROVAL_DEADLINE: no backup approver",
+                expected=CaseStatus.AWAITING_APPROVAL,
+            )
+        except (ConcurrentUpdateError, IllegalTransitionError):
+            pass  # the case already moved on (e.g. an executed Tier 1 part)

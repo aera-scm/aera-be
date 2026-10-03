@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from services.routing.store import ControlStore
 from services.shared.case_state import can_transition
 from services.shared.cases import CaseStore, ConcurrentUpdateError, IllegalTransitionError
 from services.shared.dynamo import from_item, table_name, to_item
@@ -79,7 +80,11 @@ class RunStarter:
                 return Started(str(pending["data"]["runId"]), "started")
         if case is None:
             return Started(None, "case not found")
-        if case.status not in STARTABLE or not can_transition(
+        # BR-23 (ADR-0036): an approval whose deadline passed is re-planned and re-verified.
+        reverify = case.status is CaseStatus.AWAITING_APPROVAL and ControlStore(
+            self.dynamodb, self.env
+        ).expired_pending(case_id, case.plan_version)
+        if (case.status not in STARTABLE and not reverify) or not can_transition(
             case.status, CaseStatus.INVESTIGATING
         ):
             return Started(None, f"case is {case.status.value}")

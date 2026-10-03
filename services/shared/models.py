@@ -335,6 +335,15 @@ class PlanRecord(Model):
     proposed_at: datetime
     verified_at: datetime | None = None
 
+    @classmethod
+    def from_stored(cls, item: dict[str, Any]) -> PlanRecord:
+        """A `PLAN#{v}` item also carries the Verifier's projection and Automated Reasoning
+        record and the table keys; only the plan-record fields belong to the model."""
+        return cls.model_validate({k: item[k] for k in PLAN_RECORD_FIELDS if k in item})
+
+
+PLAN_RECORD_FIELDS = ("plan", "confidence", "checks", "proposedAt", "verifiedAt")
+
 
 # DR-06 .. DR-15 -------------------------------------------------------------------------
 

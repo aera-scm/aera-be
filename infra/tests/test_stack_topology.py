@@ -55,11 +55,10 @@ def test_nfr_mnt_02_all_stacks_and_dependencies() -> None:
             template.resource_count_is("AWS::BedrockAgentCore::Runtime", 0)
         if name != "control":
             template.resource_count_is("AWS::StepFunctions::StateMachine", 0)
-        for resource in (
-            "AWS::CloudFront::Distribution",
-            "AWS::KinesisFirehose::DeliveryStream",
-        ):
-            template.resource_count_is(resource, 0)
+        # The console distribution lives only in the web stack (SRD 6.19).
+        if name != "web":
+            template.resource_count_is("AWS::CloudFront::Distribution", 0)
+        template.resource_count_is("AWS::KinesisFirehose::DeliveryStream", 0)
     assembly = app.synth()
     assert len(assembly.stacks) == 9
     for artifact in assembly.stacks:
@@ -114,8 +113,53 @@ def test_nfr_sec_05_private_web_bucket() -> None:
     )
     policies = template.find_resources("AWS::S3::BucketPolicy")
     statements = next(iter(policies.values()))["Properties"]["PolicyDocument"]["Statement"]
-    assert all(statement["Effect"] == "Deny" for statement in statements)
+    # Only the console distribution may read (Origin Access Control); everything else denied.
+    allowed = [statement for statement in statements if statement["Effect"] == "Allow"]
+    assert [s["Principal"] for s in allowed] == [{"Service": "cloudfront.amazonaws.com"}]
+    assert all(s["Action"] == "s3:GetObject" for s in allowed)
     assert any(
         statement.get("Condition", {}).get("NumericLessThan", {}).get("s3:TlsVersion") == 1.2
         for statement in statements
     )
+
+
+def test_srd_6_19_console_is_served_by_cloudfront_with_origin_access_control() -> None:
+    app = build_app(DataSettings(env_name="dev", owner="synthetic-owner"))
+    template = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-web")))
+    template.resource_count_is("AWS::CloudFront::Distribution", 1)
+    template.resource_count_is("AWS::CloudFront::OriginAccessControl", 1)
+    [distribution] = template.find_resources("AWS::CloudFront::Distribution").values()
+    config = distribution["Properties"]["DistributionConfig"]
+    assert config["DefaultRootObject"] == "index.html"
+    assert config["DefaultCacheBehavior"]["ViewerProtocolPolicy"] == "redirect-to-https"
+    # Single-page application: deep links such as /cases/:id/:stage load the console.
+    assert {
+        (r["ErrorCode"], r["ResponsePagePath"], r["ResponseCode"])
+        for r in config["CustomErrorResponses"]
+    } == {
+        (403, "/index.html", 200),
+        (404, "/index.html", 200),
+    }
+    # The bucket stays private: only this distribution may read it.
+    policies = template.find_resources("AWS::S3::BucketPolicy")
+    statements = next(iter(policies.values()))["Properties"]["PolicyDocument"]["Statement"]
+    readers = [s for s in statements if s["Effect"] == "Allow"]
+    assert len(readers) == 1 and readers[0]["Principal"] == {"Service": "cloudfront.amazonaws.com"}
+
+
+def test_srd_6_19_console_security_headers() -> None:
+    app = build_app(DataSettings(env_name="dev", owner="synthetic-owner"))
+    template = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-web")))
+    [policy] = template.find_resources("AWS::CloudFront::ResponseHeadersPolicy").values()
+    headers = policy["Properties"]["ResponseHeadersPolicyConfig"]["SecurityHeadersConfig"]
+    assert headers["StrictTransportSecurity"]["AccessControlMaxAgeSec"] >= 31536000
+    csp = headers["ContentSecurityPolicy"]["ContentSecurityPolicy"]
+    assert "default-src 'self'" in csp and "frame-ancestors 'none'" in csp
+    assert "connect-src 'self' https://*.execute-api.us-east-1.amazonaws.com" in csp
+    assert "wss://*.execute-api.us-east-1.amazonaws.com" in csp
+    assert "https://*.auth.us-east-1.amazoncognito.com" in csp
+    assert "script-src 'self'" in csp and "'unsafe-eval'" not in csp
+    # The component library ships its icon and text fonts as data: URIs.
+    assert "font-src 'self' data: https://fonts.gstatic.com" in csp
+    assert headers["FrameOptions"]["FrameOption"] == "DENY"
+    assert headers["ContentTypeOptions"]["Override"] is True

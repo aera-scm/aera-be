@@ -2,10 +2,11 @@
 FR-UI-07, FR-UI-08, FR-UI-10, FR-RTE-02, FR-RTE-03, FR-RTE-07, FR-RTE-08, FR-VER-02, AT-16)."""
 
 from datetime import timedelta
-from typing import Any
+from typing import Any, get_args, get_type_hints
 
 import pytest
 
+from services.api.case_view import UNDO
 from services.api.handler import Api
 from services.api.tests.test_api import ENV, T0, body, make_case, request
 from services.conftest import RAW_BUCKET, RecordingBus
@@ -15,7 +16,7 @@ from services.routing.store import ControlStore
 from services.shared.audit import AuditWriter
 from services.shared.dynamo import table_name, to_item
 from services.shared.intake import Intake
-from services.shared.models import CaseDetail, CaseStatus, json_schemas
+from services.shared.models import Action, CaseDetail, CaseStatus, json_schemas
 from services.shared.signals import RawStore
 from services.verifier.tests.test_verification import NOW, limits, verified
 
@@ -242,6 +243,17 @@ def test_FR_UI_10_execution_steps_sap_documents_and_milestones(api: Api, dynamod
     audit.record(
         f"CASE#{CASE}", "UNDO_SAVED", actor="system", case_id=CASE, payload={"partId": "other"}
     )
+    # FR-EXE-07: compensation events name the step key, not the part.
+    audit.record(
+        f"CASE#{CASE}",
+        "ACTION_COMPENSATED",
+        actor="system",
+        case_id=CASE,
+        payload={"key": step_key},
+    )
+    audit.record(
+        f"CASE#{CASE}", "ACTION_IRREVERSIBLE", actor="system", case_id=CASE, payload={"key": "x"}
+    )
 
     executions = detail(api)["execution"]
 
@@ -260,7 +272,34 @@ def test_FR_UI_10_execution_steps_sap_documents_and_milestones(api: Api, dynamod
             "irreversible": False,
         }
     ]
-    assert [m["type"] for m in run["milestones"]] == ["UNDO_SAVED", "EXECUTION_COMPLETED"]
+    assert [m["type"] for m in run["milestones"]] == [
+        "UNDO_SAVED",
+        "EXECUTION_COMPLETED",
+        "ACTION_COMPENSATED",
+    ]
+
+
+def test_plan_item_with_an_unknown_attribute_still_reads(api: Api, dynamodb: Any) -> None:
+    seed_routed(dynamodb)
+    dynamodb.update_item(
+        TableName=table_name("cases", ENV),
+        Key=to_item({"PK": f"CASE#{CASE}", "SK": "PLAN#1"}),
+        UpdateExpression="SET futureVerifierField = :v",
+        ExpressionAttributeValues=to_item({":v": "anything"}),
+    )
+
+    plan = detail(api)["plan"]
+
+    assert plan["plan"]["chosen"] == ["C", "A"]
+    assert "futureVerifierField" not in plan
+
+
+def test_BR_17_undo_summary_covers_every_action_type() -> None:
+    types = {
+        get_args(get_type_hints(member)["type"])[0] for member in get_args(get_args(Action)[0])
+    }
+
+    assert set(UNDO) == types
 
 
 def test_case_detail_without_plan_invents_no_records(api: Api, dynamodb: Any) -> None:

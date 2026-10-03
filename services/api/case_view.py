@@ -59,9 +59,14 @@ def undo_summary(plan: ProposedPlan, option_ids: list[str]) -> list[UndoStep]:
     ]
 
 
+# Only the stored plan-record fields; other attributes on the item (projection, policy
+# statements, later additions) are not part of the console contract.
+PLAN_FIELDS = ("plan", "confidence", "checks", "proposedAt", "verifiedAt")
+
+
 def _plan(item: dict[str, Any], version_hash: str | None) -> PlanView:
-    data = {k: v for k, v in item.items() if k not in {"PK", "SK", "projection"}}
-    reasoning = data.pop("automatedReasoning", None)
+    data = {k: item[k] for k in PLAN_FIELDS if k in item}
+    reasoning = item.get("automatedReasoning")
     if reasoning is not None:
         data["automatedReasoning"] = {
             "status": reasoning["status"],
@@ -145,11 +150,13 @@ class CaseView:
         views = []
         for part_id, record in records.items():
             steps = []
+            keys = set()
             for step in record["request"]["steps"]:
                 action = step["action"]
                 key = idempotency_key(
                     case_id, version, int(step["index"]), action["type"], step["target"]
                 )
+                keys.add(key)
                 journal = self.journal.read(key) or {}
                 result = journal.get("result") or {}
                 undo = journal.get("undo") or {}
@@ -175,7 +182,8 @@ class CaseView:
                         "milestones": [
                             {"type": e.type, "ts": e.ts}
                             for e in events
-                            if e.payload.get("partId") == part_id
+                            # Compensation events name the step key instead of the part.
+                            if e.payload.get("partId") == part_id or e.payload.get("key") in keys
                         ],
                     }
                 )

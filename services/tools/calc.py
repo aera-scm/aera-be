@@ -221,8 +221,9 @@ def calc_option(
     ctx: ToolContext, case_id: str, action_type: str, params: dict[str, Any]
 ) -> dict[str, Any]:
     # One pricing moment: the Verifier recalculates the option at `createdAt`, so it must be
-    # the clock the arrival was computed from, not a later reading (V-01, V-04, V-10).
-    priced_at = ctx.now()
+    # the clock the arrival was computed from, not a later reading (V-01, V-04, V-10). Whole
+    # seconds, because the model copies times without fractions.
+    priced_at = ctx.now().replace(microsecond=0)
     draft, _ = compute_option(replace(ctx, clock=lambda: priced_at), case_id, action_type, params)
     ctx.dynamodb.put_item(
         TableName=table_name("cases", ctx.env),

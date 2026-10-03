@@ -40,6 +40,34 @@ def plan_hash(plan: ProposedPlan) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def _moment(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if aware(value) else None
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if aware(moment) else None
+
+
+def same(left: Any, right: Any) -> bool:
+    """A figure equals its re-read value: the same number, or the same instant however the
+    time was written (`2026-10-03T08:15:15Z` and `2026-10-03 08:15:15+00:00`)."""
+    if left == right:
+        return True
+    if left is None or right is None:
+        return False
+    moments = (_moment(left), _moment(right))
+    if moments[0] is not None and moments[1] is not None:
+        return moments[0] == moments[1]
+    try:
+        return Decimal(str(left)) == Decimal(str(right))
+    except ArithmeticError:
+        return False
+
+
 def finite(value: Decimal, *, positive: bool = False) -> bool:
     return value.is_finite() and (value > 0 if positive else value >= 0)
 
@@ -139,7 +167,7 @@ def confidence(
         for option, figure in figures
         if figure.source_ref.startswith(("SAP:", "ratecard:", "planner:"))
         and option.id in evidence
-        and evidence[option.id].reread.get((figure.source_ref, figure.name)) == figure.value
+        and same(evidence[option.id].reread.get((figure.source_ref, figure.name)), figure.value)
     )
     share = Decimal(supported) / len(figures) if figures else ZERO
     score = grounding.score if grounding.valid() else ZERO
@@ -273,10 +301,10 @@ def verify(
         source_ok = (
             bool(option.figures)
             and all(
-                facts.reread.get((figure.source_ref, figure.name)) == figure.value
+                same(facts.reread.get((figure.source_ref, figure.name)), figure.value)
                 for figure in option.figures
             )
-            and all(figure_values.get(name) == value for name, value in required.items())
+            and all(same(figure_values.get(name), value) for name, value in required.items())
         )
         source_ok = source_ok and any(
             figure.name == "costUsd" and figure.source_ref == option.cost_source_ref
@@ -292,12 +320,12 @@ def verify(
             f"{figure.name} {figure.value} differs from re-read "
             f"{facts.reread.get((figure.source_ref, figure.name), 'nothing')}"
             for figure in option.figures
-            if facts.reread.get((figure.source_ref, figure.name)) != figure.value
+            if not same(facts.reread.get((figure.source_ref, figure.name)), figure.value)
         ]
         problems += [
             f"figure {name} missing or not equal to the option"
             for name, value in required.items()
-            if figure_values.get(name) != value
+            if not same(figure_values.get(name), value)
         ]
         problems += [
             f"{name} {given} differs from recalculated {expected}"

@@ -8,7 +8,7 @@ from `propose_plan`. Only the Guardrail grounding score is supplied by the test.
 import itertools
 import json
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -312,5 +312,44 @@ def test_fr_imp_03_options_without_figures_get_the_sourced_draft_figures(
     names = {o["id"]: {f["name"] for f in o["figures"]} for o in plan["plan"]["options"]}
     assert names["C"] == {"donorFree", "costUsd", "arrival"}
     assert {"airQuantity", "costUsd", "arrival"} <= names["A"]
+    assert failed(ctx) == {"V-06/B"}
+    assert verified["tier"] == 2
+
+
+def test_fr_ver_01_agent_written_times_without_fractions_still_verify(
+    ctx: ToolContext,  # noqa: F811
+    photo: Signal,  # noqa: F811
+    verifier: VerifierService,
+) -> None:
+    """Live: the model copied arrivals as `...T08:15:15Z` while the draft held
+    `08:15:15.290185+00:00`, and rewrote time figures in ISO `Z` form. Prices are taken at
+    whole seconds and time figures compare as instants, so neither fails V-01/V-04/V-10."""
+    ticks = itertools.count()
+    agent = replace(ctx, clock=lambda: T0 + timedelta(seconds=next(ticks), microseconds=290185))
+
+    def iso(value: Any) -> str:
+        moment = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+        return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    options = []
+    for option in reference_options(agent, photo):
+        actions = [
+            {**a, "arrival": iso(a["arrival"])} if "arrival" in a else a for a in option["actions"]
+        ]
+        figures = [
+            {**f, "value": iso(f["value"])} if f["name"] in ("arrival", "remainderAt") else f
+            for f in option["figures"]
+        ]
+        options.append(
+            {**option, "arrival": iso(option["arrival"]), "actions": actions, "figures": figures}
+        )
+    result = case_tools.propose_plan(
+        agent, CASE, {"options": options, "chosen": ["C", "A"], "rationale": "Options C+A"}
+    )
+    assert result["accepted"] is True, result
+    later = replace(verifier, clock=lambda: T0 + timedelta(minutes=2, seconds=next(ticks)))
+
+    verified = later.handle(CASE, 1)
+
     assert failed(ctx) == {"V-06/B"}
     assert verified["tier"] == 2

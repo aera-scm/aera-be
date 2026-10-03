@@ -295,3 +295,17 @@ def test_fr_lng_01_locator_accepts_json_only() -> None:
             return {"output": {"message": {"content": [{"text": '{"QUANTITY":"640"}'}]}}}
 
     assert BedrockLocator(Model(), "small")("Menge 640", "de") == {"QUANTITY": "640"}
+
+
+def test_fr_lng_01_locator_reads_json_wrapped_in_a_code_fence() -> None:
+    """Live 2026-10-04: Nova Lite answered ```json {...} ``` and every field was dropped."""
+
+    class Model:
+        def converse(self, **kwargs: Any) -> dict[str, Any]:
+            text = '```json\n{\n  "QUANTITY": "640 PC",\n  "PO_NUMBER": "4500001234"\n}\n```'
+            return {"output": {"message": {"content": [{"text": text}]}}}
+
+    assert BedrockLocator(Model(), "small")("JUMLAH 640 PC", "id") == {
+        "QUANTITY": "640 PC",
+        "PO_NUMBER": "4500001234",
+    }

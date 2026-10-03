@@ -372,6 +372,87 @@ class ExecutionRecord(Model):
     undo_action: dict[str, Any] | None = None
 
 
+# Console case detail (SRD 6.10, FR-UI-07/08/10, FR-RTE-02/07/08) ----------------------
+
+
+class AutomatedReasoningView(Model):
+    status: str
+    findings: list[str] = Field(default_factory=list)
+
+
+class PlanView(PlanRecord):
+    """The current plan version with what the Verifier recorded and the hash to approve."""
+
+    plan_version_hash: str | None = None
+    automated_reasoning: AutomatedReasoningView | None = None
+
+
+class UndoStep(Model):
+    option_id: str
+    action_type: str
+    reversible: bool
+    undo: str
+
+
+class PlanPartView(Model):
+    plan_part_id: str
+    options: list[str]
+    tier: Annotated[int, Field(ge=1, le=3)]
+    cost_usd: Money
+    confidence: Ratio | None = None
+    sampled: bool = False
+    approver_id: str | None = None
+    backup_approver_id: str | None = None
+    deadline_at: datetime | None = None
+    reminder_at: datetime | None = None
+    reminded: bool = False
+    expired: bool = False
+    decision: Literal["APPROVED", "REJECTED"] | None = None
+    comment: str | None = None
+    decided_at: datetime | None = None
+    undo_summary: list[UndoStep] = Field(default_factory=list)
+
+
+class RouteView(Model):
+    plan_version: Annotated[int, Field(ge=1)]
+    plan_version_hash: str
+    tier: Annotated[int, Field(ge=1, le=3)]
+    reason: str | None = None
+    routed_at: datetime
+    parts: list[PlanPartView] = Field(default_factory=list)
+
+
+class ExecutionStepView(Model):
+    index: Annotated[int, Field(ge=0)]
+    action_type: str
+    target: str
+    status: Literal["READY", "PENDING", "SUCCEEDED", "REJECTED", "UNDONE"] | None = None
+    sap_document: str | None = None
+    source_ref: str | None = None
+    undo_type: str | None = None
+    irreversible: bool = False
+
+
+class ExecutionMilestone(Model):
+    type: str
+    ts: datetime
+
+
+class ExecutionView(Model):
+    plan_part_id: str
+    status: Literal["READY", "PENDING", "SUCCEEDED", "REJECTED", "UNDONE"]
+    steps: list[ExecutionStepView] = Field(default_factory=list)
+    milestones: list[ExecutionMilestone] = Field(default_factory=list)
+
+
+class CaseDetail(Model):
+    case: Case
+    signals: list[Signal]
+    plan: PlanView | None = None
+    route: RouteView | None = None
+    execution: list[ExecutionView] = Field(default_factory=list)
+
+
 class AuditEvent(Model):
     event_id: Ulid
     chain_key: str
@@ -526,6 +607,7 @@ EXPORTED: tuple[type[BaseModel], ...] = (
     Approval,
     Reservation,
     ExecutionRecord,
+    CaseDetail,
     AuditEvent,
     ConfigItem,
     RateCard,

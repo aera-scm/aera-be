@@ -27,6 +27,7 @@ from typing import Any
 
 from services.api import whatif
 from services.api.admin import Admin, AdminError
+from services.api.case_view import CaseView
 from services.api.chat import Chat
 from services.interop.logic import InteropRefused, authorize, rate_limit
 from services.lab.delivery import ChannelReplay
@@ -462,14 +463,12 @@ class Api:
             raise Problem(403, "Not allowed to decide", str(error)) from None
         except ApprovalConflict as error:
             current = control.get(case_id, f"ROUTE#{case.plan_version}")
-            return http.response(
+            return http.problem(
                 409,
-                {
-                    "title": "Decision refused",
-                    "detail": str(error),
-                    "currentPlanVersion": case.plan_version,
-                    "currentPlanVersionHash": current["versionHash"] if current else None,
-                },
+                "Decision refused",
+                str(error),
+                currentPlanVersion=case.plan_version,
+                currentPlanVersionHash=current["versionHash"] if current else None,
             )
         except ValueError as error:
             raise Problem(400, "Invalid decision", str(error)) from None
@@ -598,6 +597,7 @@ class Api:
         return {
             "case": _case_json(case),
             "signals": [s.model_dump(mode="json", by_alias=True) for s in signals],
+            **CaseView(self.dynamodb, self.env).read(case),
         }
 
     def dialogue_thread(self, case_id: str) -> list[dict[str, Any]]:

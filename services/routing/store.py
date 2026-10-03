@@ -327,6 +327,14 @@ class ControlStore:
 
     def tick(self, case_id: str, part_id: str, *, now: datetime) -> None:
         part = self.get(case_id, f"PART#{part_id}")
+        if (
+            part is not None
+            and part["expired"]
+            and not part.get("approver")  # a None value is not stored
+            and not part.get("decision")
+        ):
+            self._escalate(case_id)  # a timer that stopped after expiring the part retries this
+            return
         if part is None or part["tier"] != 2 or part.get("decision") or part["expired"]:
             return
         deadline = datetime.fromisoformat(part["deadline"])
@@ -337,7 +345,8 @@ class ControlStore:
         if now >= deadline:
             backups = [
                 p.user_id
-                for p in eligible(self.limits(), part["plant"], part["cost"], now)
+                # Never back to an approver who already let this case's approval expire.
+                for p in eligible(self.limits(case_id), part["plant"], part["cost"], now)
                 if p.user_id != part["approver"]
             ]
             changed.update(
@@ -379,14 +388,17 @@ class ControlStore:
         except TransactionConflictError:
             return  # A concurrent timer or decision won; its durable state is authoritative.
         if kind == "APPROVAL_EXPIRED" and not changed["approver"]:
-            # BR-23: no backup approver with a sufficient limit, so the case escalates.
-            try:
-                self.cases.transition(
-                    case_id,
-                    CaseStatus.ESCALATED,
-                    actor="system",
-                    reason="APPROVAL_DEADLINE: no backup approver",
-                    expected=CaseStatus.AWAITING_APPROVAL,
-                )
-            except (ConcurrentUpdateError, IllegalTransitionError):
-                pass  # the case already moved on (e.g. an executed Tier 1 part)
+            self._escalate(case_id)
+
+    def _escalate(self, case_id: str) -> None:
+        """BR-23: no backup approver with a sufficient limit, so the case escalates."""
+        try:
+            self.cases.transition(
+                case_id,
+                CaseStatus.ESCALATED,
+                actor="system",
+                reason="APPROVAL_DEADLINE: no backup approver",
+                expected=CaseStatus.AWAITING_APPROVAL,
+            )
+        except (ConcurrentUpdateError, IllegalTransitionError):
+            pass  # the case already moved on (e.g. an executed Tier 1 part)

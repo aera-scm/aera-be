@@ -706,3 +706,9 @@ def test_srd_6_5_propose_plan_tells_the_model_the_plan_shape() -> None:
     shape = BY_NAME["propose_plan"].properties["plan"]["description"]
 
     assert all(word in shape for word in ('"chosen"', "one capital letter", "calc_option"))
+
+
+@pytest.mark.parametrize("unit", ["PC", "ST", "EA"])
+def test_br_02_a_piece_quantity_matches_any_piece_unit_code(unit: str) -> None:
+    """S/4 may return the internal code ST (Stueck) where a supplier writes PC."""
+    assert calc._quantity("640 PC", unit) == Decimal(640)

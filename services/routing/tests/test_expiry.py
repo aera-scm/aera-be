@@ -15,7 +15,7 @@ from services.shared.case_state import can_transition
 from services.shared.cases import CaseStore
 from services.shared.dynamo import to_item
 from services.shared.models import Case, CaseStatus
-from services.verifier.tests.test_verification import NOW, limits, verified
+from services.verifier.tests.test_verification import NOW, limits, reference, verified
 
 ENV = "test"
 CASE = "EXC-2026-0914"
@@ -136,3 +136,58 @@ def test_BR_23_the_next_route_moves_to_the_backup_approver(dynamodb: Any) -> Non
 @pytest.mark.parametrize("target", [CaseStatus.INVESTIGATING, CaseStatus.ESCALATED])
 def test_SRD_6_4_awaiting_approval_may_leave_after_the_deadline(target: CaseStatus) -> None:
     assert can_transition(CaseStatus.AWAITING_APPROVAL, target)
+
+
+def test_BR_23_escalation_is_retried_when_the_timer_stopped_after_its_write(
+    dynamodb: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review WP-8c: the part is expired durably; a crash before the case moved must not
+    leave AWAITING_APPROVAL with nobody to decide."""
+    store, part = awaiting(dynamodb, backup=False)
+
+    def crash(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("Lambda stopped")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store.cases, "transition", crash)
+        with pytest.raises(RuntimeError):
+            store.tick(CASE, part, now=NOW + timedelta(hours=4))
+    store.tick(CASE, part, now=NOW + timedelta(hours=4, minutes=1))
+
+    assert status(dynamodb) is CaseStatus.ESCALATED
+
+
+def test_BR_23_a_second_expiry_never_returns_to_an_approver_who_missed_one(
+    dynamodb: Any,
+) -> None:
+    store, part = awaiting(dynamodb)
+    third = limits()[1].model_copy(update={"user_id": "third"})
+    dynamodb.put_item(
+        TableName=store.config,
+        Item=to_item({"PK": "APPR#third", **third.model_dump(by_alias=True)}),
+    )
+    store.tick(CASE, part, now=NOW + timedelta(hours=4))  # primary missed version 1
+    dynamodb.update_item(
+        TableName=store.table,
+        Key=to_item({"PK": f"CASE#{CASE}", "SK": "META"}),
+        UpdateExpression="SET planVersion = :v",
+        ExpressionAttributeValues=to_item({":v": 2}),
+    )
+    plan, evidence = reference()
+    plan = plan.model_copy(update={"plan_version": 2})
+    value = verified(plan, evidence)
+    second = route(
+        value,
+        now=NOW,
+        stockout=NOW + timedelta(hours=24),
+        plant="1010",
+        limits=store.limits(case_id=CASE),
+    )
+    store.save(value, second, plant="1010", now=NOW)
+    [pending] = [p for p in second.parts if p.tier == 2]
+    assert pending.approver == "backup"
+
+    store.tick(CASE, pending.id, now=NOW + timedelta(hours=4))
+
+    stored = store.get(CASE, f"PART#{pending.id}")
+    assert stored is not None and stored["approver"] == "third"

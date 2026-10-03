@@ -38,7 +38,7 @@ class WebStack(Stack):
                 "default-src 'self'",
                 "script-src 'self'",
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-                "font-src 'self' https://fonts.gstatic.com",
+                "font-src 'self' data: https://fonts.gstatic.com",
                 "img-src 'self' data:",
                 f"connect-src 'self' https://*.execute-api.{region}.amazonaws.com "
                 f"wss://*.execute-api.{region}.amazonaws.com "

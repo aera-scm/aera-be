@@ -159,5 +159,7 @@ def test_srd_6_19_console_security_headers() -> None:
     assert "wss://*.execute-api.us-east-1.amazonaws.com" in csp
     assert "https://*.auth.us-east-1.amazoncognito.com" in csp
     assert "script-src 'self'" in csp and "'unsafe-eval'" not in csp
+    # The component library ships its icon and text fonts as data: URIs.
+    assert "font-src 'self' data: https://fonts.gstatic.com" in csp
     assert headers["FrameOptions"]["FrameOption"] == "DENY"
     assert headers["ContentTypeOptions"]["Override"] is True

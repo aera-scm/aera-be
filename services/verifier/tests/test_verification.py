@@ -8,7 +8,7 @@ import pytest
 
 from services.routing.logic import Policy, Route, route
 from services.shared.models import ApproverLimit, ProposedPlan
-from services.verifier.grounding import evaluate
+from services.verifier.grounding import evaluate, sentences
 from services.verifier.logic import (
     Corroboration,
     Donor,
@@ -326,3 +326,49 @@ def test_V_13_grounding_adapter_requires_both_scores() -> None:
     assert not evaluate(
         client, "guard", "1", rationale="rationale", source="SAP data", query="case"
     ).available
+
+
+def test_V_13_BR_18_grounding_is_the_mean_of_sentence_scores() -> None:
+    """ADR-0033: G = mean GROUNDING over the rationale's sentences; RELEVANCE from the whole
+    rationale; one failed call makes the whole check unavailable."""
+    whole = "Option A ships 600 PC. Option B flies 640 PC (ratecard:RC-AIR)."
+    scores = {
+        whole: (0.3, 0.9),
+        "Option A ships 600 PC.": (0.8, 0.2),
+        "Option B flies 640 PC (ratecard:RC-AIR).": (0.6, 0.1),
+    }
+
+    class Client:
+        def __init__(self, fail_on: str = "") -> None:
+            self.fail_on = fail_on
+
+        def apply_guardrail(self, **request: Any) -> dict[str, Any]:
+            text = request["content"][2]["text"]["text"]
+            if text == self.fail_on:
+                return {}
+            grounding, relevance = scores[text]
+            return {
+                "assessments": [
+                    {
+                        "contextualGroundingPolicy": {
+                            "filters": [
+                                {"type": "GROUNDING", "score": grounding},
+                                {"type": "RELEVANCE", "score": relevance},
+                            ]
+                        }
+                    }
+                ]
+            }
+
+    result = evaluate(Client(), "guard", "1", rationale=whole, source="SAP data", query="case")
+    assert result == Grounding(D("0.7"), D("0.9"), True)
+    failed = evaluate(
+        Client(fail_on="Option A ships 600 PC."),
+        "guard",
+        "1",
+        rationale=whole,
+        source="SAP data",
+        query="case",
+    )
+    assert not failed.available
+    assert sentences("Costs 6.2 h. Next one.") == ["Costs 6.2 h.", "Next one."]

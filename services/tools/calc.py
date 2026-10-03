@@ -16,7 +16,7 @@ from decimal import Decimal
 from typing import Any
 
 from services.rules.br_02 import usable
-from services.shared.dynamo import table_name, to_item
+from services.shared.dynamo import from_item, table_name, to_item
 from services.shared.models import ExtractedField, FieldStatus
 from services.shared.ratecard import Rate
 from services.shared.triage import assess
@@ -390,7 +390,10 @@ def compute_option(
     return draft, rate
 
 
-def draft_exists(ctx: ToolContext, case_id: str, cost: Any, coverage: Any, cost_ref: str) -> bool:
+def draft_record(
+    ctx: ToolContext, case_id: str, cost: Any, coverage: Any, cost_ref: str
+) -> dict[str, Any] | None:
+    """The recorded `calc_option` result an option's cost and coverage came from."""
     item = ctx.dynamodb.get_item(
         TableName=table_name("cases", ctx.env),
         Key={
@@ -398,4 +401,4 @@ def draft_exists(ctx: ToolContext, case_id: str, cost: Any, coverage: Any, cost_
             "SK": {"S": f"DRAFT#{draft_key(cost, coverage, cost_ref)}"},
         },
     ).get("Item")
-    return item is not None
+    return from_item(item) if item is not None else None

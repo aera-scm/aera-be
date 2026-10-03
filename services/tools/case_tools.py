@@ -22,9 +22,17 @@ from services.dialogue.facts import load_facts
 from services.dialogue.policy import Template, render_question
 from services.rules.br_02 import usable
 from services.shared.dynamo import from_item, table_name, to_item
-from services.shared.models import CaseStatus, PlanRecord, ProposedPlan, SignalStatus, new_ulid
+from services.shared.models import (
+    CaseStatus,
+    Figure,
+    Option,
+    PlanRecord,
+    ProposedPlan,
+    SignalStatus,
+    new_ulid,
+)
 from services.shared.runtime import emit
-from services.tools.calc import draft_exists
+from services.tools.calc import draft_record
 from services.tools.context import ToolContext, ToolError, json_dict
 
 COMPONENT = "tools"
@@ -221,6 +229,19 @@ def request_supplier_info(
     return {"status": "WAITING_SUPPLIER", "messageId": message_id}
 
 
+def _with_draft_figures(option: Option, draft: dict[str, Any]) -> Option:
+    """FR-IMP-03: an option carries the sourced figures of the `calc_option` result it was
+    built from. Figures the model wrote stay as written (V-01 re-reads them); figures it left
+    out are taken from the recorded draft, never invented."""
+    named = {figure.name for figure in option.figures}
+    added = [
+        Figure.model_validate(figure)
+        for figure in draft.get("figures", [])
+        if figure.get("name") not in named
+    ]
+    return option.model_copy(update={"figures": [*option.figures, *added]})
+
+
 def propose_plan(ctx: ToolContext, case_id: str, plan: dict[str, Any]) -> dict[str, Any]:
     case = _investigating(ctx, case_id)
     options = plan.get("options") if isinstance(plan, dict) else None
@@ -249,13 +270,13 @@ def propose_plan(ctx: ToolContext, case_id: str, plan: dict[str, Any]) -> dict[s
             f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in error.errors()[:10]
         ]
         return {"accepted": False, "errors": problems}
-    ungrounded = [
-        option.id
-        for option in proposal.options
-        if not draft_exists(
+    drafts = {
+        option.id: draft_record(
             ctx, case_id, option.cost_usd, option.coverage_units, option.cost_source_ref
         )
-    ]
+        for option in proposal.options
+    }
+    ungrounded = [oid for oid, draft in drafts.items() if draft is None]
     if ungrounded:
         return {
             "accepted": False,
@@ -264,6 +285,9 @@ def propose_plan(ctx: ToolContext, case_id: str, plan: dict[str, Any]) -> dict[s
                 for oid in ungrounded
             ],
         }
+    proposal = proposal.model_copy(
+        update={"options": [_with_draft_figures(o, drafts[o.id] or {}) for o in proposal.options]}
+    )
     breaches = constraint_breaches(ctx, case_id, proposal)
     if breaches:
         return {"accepted": False, "errors": breaches}

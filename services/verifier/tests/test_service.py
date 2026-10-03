@@ -291,3 +291,26 @@ def test_fr_ver_01_reference_plan_verifies_on_a_running_clock(
 
     assert failed(ctx) == {"V-06/B"}
     assert result["tier"] == 2
+
+
+def test_fr_imp_03_options_without_figures_get_the_sourced_draft_figures(
+    ctx: ToolContext,  # noqa: F811
+    photo: Signal,  # noqa: F811
+    verifier: VerifierService,
+) -> None:
+    """The live agent sent options with empty `figures` (sources only in the rationale):
+    the plan must carry the draft's sourced figures, and V-01 must pass on them."""
+    options = [{**option, "figures": []} for option in reference_options(ctx, photo)]
+    result = case_tools.propose_plan(
+        ctx, CASE, {"options": options, "chosen": ["C", "A"], "rationale": "Options C+A"}
+    )
+    assert result["accepted"] is True, result
+
+    verified = verifier.handle(CASE, 1)
+
+    plan = ControlStore(ctx.dynamodb, ENV).get(CASE, "PLAN#1") or {}
+    names = {o["id"]: {f["name"] for f in o["figures"]} for o in plan["plan"]["options"]}
+    assert names["C"] == {"donorFree", "costUsd", "arrival"}
+    assert {"airQuantity", "costUsd", "arrival"} <= names["A"]
+    assert failed(ctx) == {"V-06/B"}
+    assert verified["tier"] == 2

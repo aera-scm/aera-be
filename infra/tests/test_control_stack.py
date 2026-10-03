@@ -259,13 +259,13 @@ def test_adr_0026_only_the_reasoning_guardrail_uses_the_us_guardrail_profile(
         ":guardrail-profile/us.guardrail.v1:0" in json.dumps(s["Resource"]) for s in statements
     )
     # ADR-0030: the profile may route to another US Region; the same guardrail id is allowed
-    # there and nothing broader.
+    # there and nothing broader: US Regions only, and no wildcard guardrail.
     resources = json.dumps([s["Resource"] for s in statements])
     assert (
-        '":bedrock:*:"' in resources
+        '":bedrock:us-*:"' in resources
         and '":guardrail/", {"Fn::GetAtt": ["ReasoningGuardrail", "GuardrailId"]}' in resources
     )
-    assert '":bedrock:*:", {"Ref": "AWS::AccountId"}, ":guardrail/*"' not in resources
+    assert ":guardrail/*" not in resources and '":bedrock:*:"' not in resources
 
 
 def test_adr_0026_input_guardrail_stays_in_region() -> None:
@@ -275,3 +275,23 @@ def test_adr_0026_input_guardrail_stays_in_region() -> None:
     gate = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-gate")))
     for guardrail in gate.find_resources("AWS::Bedrock::Guardrail").values():
         assert "CrossRegionConfig" not in guardrail["Properties"]
+
+
+def test_fr_ver_03_verifier_has_an_in_region_grounding_guardrail(
+    templates: dict[str, assertions.Template],
+) -> None:
+    """ADR-0031: the input guardrail has no grounding policy, so the Verifier scored every
+    rationale 0 and no plan could reach BR-05's confidence floor."""
+    control = templates["control"]
+    guardrails = control.find_resources("AWS::Bedrock::Guardrail").values()
+    [grounding] = [g for g in guardrails if "ContextualGroundingPolicyConfig" in g["Properties"]]
+    filters = grounding["Properties"]["ContextualGroundingPolicyConfig"]["FiltersConfig"]
+    assert {(f["Type"], f["Threshold"]) for f in filters} == {
+        ("GROUNDING", 0.7),
+        ("RELEVANCE", 0.7),
+    }
+    assert "CrossRegionConfig" not in grounding["Properties"]
+    names = {
+        p["Properties"]["Name"] for p in control.find_resources("AWS::SSM::Parameter").values()
+    }
+    assert {"/aera/dev/GROUNDING_GUARDRAIL_ID", "/aera/dev/GROUNDING_GUARDRAIL_VERSION"} <= names

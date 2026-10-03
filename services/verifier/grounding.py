@@ -1,11 +1,14 @@
 """Bedrock contextual grounding adapter (FR-VER-03); unavailable scores fail closed."""
 
+import logging
 from decimal import Decimal
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 
 from services.verifier.logic import Grounding
+
+LOG = logging.getLogger(__name__)
 
 
 def evaluate(
@@ -30,5 +33,13 @@ def evaluate(
                 scores.setdefault(item["type"], []).append(Decimal(str(item["score"])))
         result = Grounding(min(scores["GROUNDING"]), min(scores["RELEVANCE"]), True)
         return result if result.valid() else Grounding()
-    except (BotoCoreError, ClientError, KeyError, TypeError, ValueError, ArithmeticError):
+    except KeyError:
+        # The guardrail answered without grounding scores: it has no grounding policy.
+        LOG.warning("Grounding check returned no grounding and relevance scores")
+        return Grounding()
+    except ClientError as error:
+        LOG.warning("Grounding check unavailable: %s", error.response.get("Error", {}).get("Code"))
+        return Grounding()
+    except (BotoCoreError, TypeError, ValueError, ArithmeticError) as error:
+        LOG.warning("Grounding check unavailable: %s", type(error).__name__)
         return Grounding()

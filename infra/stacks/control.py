@@ -82,9 +82,37 @@ class ControlStack(Stack):
             "ReasoningGuardrailVersion",
             guardrail_identifier=reasoning_guardrail.attr_guardrail_id,
         )
+        # ADR-0031: FR-VER-03 contextual grounding of the plan rationale. Its own guardrail,
+        # in this Region only (no cross-Region profile, NFR-CMP-02).
+        grounding_guardrail = bedrock.CfnGuardrail(
+            self,
+            "GroundingGuardrail",
+            name=f"aera-{env_name}-plan-grounding",
+            description="Contextual grounding of the plan rationale (FR-VER-03)",
+            blocked_input_messaging="Blocked by the AERA grounding guardrail.",
+            blocked_outputs_messaging="Plan rationale is not grounded in the SAP data.",
+            contextual_grounding_policy_config=(
+                bedrock.CfnGuardrail.ContextualGroundingPolicyConfigProperty(
+                    filters_config=[
+                        bedrock.CfnGuardrail.ContextualGroundingFilterConfigProperty(
+                            type=kind, threshold=0.7
+                        )
+                        for kind in ("GROUNDING", "RELEVANCE")
+                    ]
+                )
+            ),
+            kms_key_arn=data.key.key_arn,
+        )
+        grounding_version = bedrock.CfnGuardrailVersion(
+            self,
+            "GroundingGuardrailVersion",
+            guardrail_identifier=grounding_guardrail.attr_guardrail_id,
+        )
         for key, value in (
             ("REASONING_GUARDRAIL_ID", reasoning_guardrail.attr_guardrail_id),
             ("REASONING_GUARDRAIL_VERSION", reasoning_version.attr_version),
+            ("GROUNDING_GUARDRAIL_ID", grounding_guardrail.attr_guardrail_id),
+            ("GROUNDING_GUARDRAIL_VERSION", grounding_version.attr_version),
         ):
             ssm.StringParameter(
                 self,
@@ -349,8 +377,8 @@ class ControlStack(Stack):
             secrets=(MIRROR_SECRET,),
             parameters=(
                 "SAP_READ_BASE",
-                "GUARDRAIL_ID",
-                "GUARDRAIL_VERSION",
+                "GROUNDING_GUARDRAIL_ID",
+                "GROUNDING_GUARDRAIL_VERSION",
                 "REASONING_GUARDRAIL_ID",
                 "REASONING_GUARDRAIL_VERSION",
                 "REASONING_POLICY_ARN",
@@ -368,14 +396,14 @@ class ControlStack(Stack):
             iam.PolicyStatement(
                 actions=["bedrock:ApplyGuardrail"],
                 resources=[
-                    self.format_arn(service="bedrock", resource="guardrail/*"),
+                    grounding_guardrail.attr_guardrail_arn,
                     reasoning_guardrail.attr_guardrail_arn,
                     reasoning_profile,
                     # ADR-0030: the US guardrail profile may serve the call from another US
                     # Region; IAM evaluates the same guardrail id there.
                     self.format_arn(
                         service="bedrock",
-                        region="*",
+                        region="us-*",
                         resource="guardrail",
                         resource_name=reasoning_guardrail.attr_guardrail_id,
                     ),

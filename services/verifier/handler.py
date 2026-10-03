@@ -24,8 +24,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         def grounding(rationale: str, source: str, query: str) -> Grounding:
             return evaluate(
                 bedrock,
-                runtime.parameter("GUARDRAIL_ID"),
-                runtime.parameter("GUARDRAIL_VERSION"),
+                runtime.parameter("GROUNDING_GUARDRAIL_ID"),
+                runtime.parameter("GROUNDING_GUARDRAIL_VERSION"),
                 rationale=rationale,
                 source=source,
                 query=query,

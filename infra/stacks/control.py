@@ -388,7 +388,8 @@ class ControlStack(Stack):
         ).function
         for name in ("cases", "audit"):
             tables[name].grant_read_write_data(verifier)
-        for name in ("signals", "config", "ledger"):
+        # analytics: SAP-derived supplier reliability for the grounding source (ADR-0032).
+        for name in ("signals", "config", "ledger", "analytics"):
             tables[name].grant_read_data(verifier)
         data.bus.grant_put_events_to(verifier)
         data.key.grant_encrypt_decrypt(verifier)

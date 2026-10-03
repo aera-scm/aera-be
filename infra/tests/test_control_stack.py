@@ -216,6 +216,8 @@ def test_srd_6_6_verifier_runs_on_plan_proposed_and_cannot_write_to_sap(
     ]
     assert policies and not any("SAP_WRITE_BASE" in p or "ses:Send" in p for p in policies)
     assert any("bedrock:ApplyGuardrail" in p for p in policies)
+    # Live: the grounding source reads supplier reliability profiles (ADR-0032).
+    assert any("dynamodb:GetItem" in p and "Tableanalytics" in p for p in policies)
 
 
 def test_fr_ver_04_reasoning_policy_uses_the_service_rule_language(

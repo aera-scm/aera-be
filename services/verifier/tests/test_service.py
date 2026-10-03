@@ -353,3 +353,29 @@ def test_fr_ver_01_agent_written_times_without_fractions_still_verify(
 
     assert failed(ctx) == {"V-06/B"}
     assert verified["tier"] == 2
+
+
+def test_fr_ver_03_grounding_source_is_sentences_from_trusted_reads(
+    ctx: ToolContext,  # noqa: F811
+    photo: Signal,  # noqa: F811
+    verifier: VerifierService,
+) -> None:
+    """ADR-0032: the rationale is checked against the Verifier's own reads as sentences
+    (purchase order, impact, options, chosen totals, projection, suppliers), never against
+    the agent's words."""
+    seen: list[str] = []
+
+    def grounding(rationale: str, source: str, query: str) -> Grounding:
+        seen.append(source)
+        return GOOD
+
+    propose(ctx, photo, ["C", "A"], "AGENT-ONLY-PHRASE transfer now, air freight behind it")
+    replace(verifier, grounding=grounding).handle(CASE, 1)
+
+    [source] = seen
+    assert "AGENT-ONLY-PHRASE" not in source
+    assert "Purchase order 4500001234 item 10" in source and "PC ordered." in source
+    assert "Option C (CREATE_STO): 600 PC, cost USD 4,100" in source
+    assert "The chosen options C + A together cost USD 42,300 and cover 1,240 PC." in source
+    assert "With the chosen options, plant 1010" in source
+    assert "Supplier 1000871" in source and "compliance status" in source

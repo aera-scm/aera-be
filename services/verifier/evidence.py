@@ -9,7 +9,6 @@ no evidence, and every check on it fails closed.
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -33,6 +32,7 @@ from services.tools.sap_tools import (
     component_requirements,
     stock_position,
 )
+from services.verifier import grounding_source
 from services.verifier.logic import Corroboration, Donor, OptionEvidence
 
 MRP = "ZAERA_MIRROR_SRV"
@@ -53,7 +53,7 @@ class Facts:
     evidence: dict[str, OptionEvidence]
     corroboration: Corroboration
     stockout: datetime
-    source: str  # the grounding source for FR-VER-03
+    source: str  # the grounding source for FR-VER-03 (grounding_source.render)
 
 
 def _number(value: Any) -> Decimal | str:
@@ -320,26 +320,7 @@ class EvidenceReader:
             )
             if facts is not None:
                 evidence[option.id] = facts
-        source = json.dumps(
-            {
-                "case": case.case_id,
-                "material": case.material,
-                "plant": case.plant,
-                "impact": {f["name"]: f["value"] for f in impact["figures"]},
-                "stockoutAt": str(need_at),
-                "unitsAtRisk": str(impact["unitsAtRisk"]),
-                "revenueAtRiskUsd": str(impact["rarUsd"]),
-                "options": {
-                    oid: {
-                        "costUsd": str(facts.expected_cost),
-                        "coverageUnits": str(facts.expected_coverage),
-                        "arrival": str(facts.expected_arrival),
-                        "actions": [a.get("type") for a in facts.expected_actions],
-                        "leadHours": str(facts.lead_hours),
-                    }
-                    for oid, facts in evidence.items()
-                },
-            },
-            default=str,
+        source = grounding_source.render(
+            self.ctx, case, plan, impact, evidence, need_at, projector, self.supplier
         )
         return Facts(evidence, self.corroboration(case), need_at, source)

@@ -44,10 +44,12 @@ def response(
     return {"statusCode": status, "headers": {"Content-Type": content_type}, "body": text}
 
 
-def problem(status: int, title: str, detail: str | None = None) -> dict[str, Any]:
+def problem(status: int, title: str, detail: str | None = None, **extra: Any) -> dict[str, Any]:
+    """RFC 7807; `extra` adds problem-specific members (e.g. the current plan hash)."""
     payload: dict[str, Any] = {"type": "about:blank", "title": title, "status": status}
     if detail:
         payload["detail"] = detail
+    payload.update(extra)
     return response(status, payload, content_type="application/problem+json")
 
 

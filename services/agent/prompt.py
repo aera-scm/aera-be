@@ -15,7 +15,7 @@ from typing import Any
 from services.shared.models import Case
 
 PROMPTS = Path(__file__).parent / "prompts"
-PROMPT_VERSION = "supervisor_v2"
+PROMPT_VERSION = "supervisor_v3"
 
 
 def system_prompt(version: str = PROMPT_VERSION) -> str:

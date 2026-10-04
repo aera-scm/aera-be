@@ -189,6 +189,8 @@ def request_supplier_info(
     _investigating(ctx, case_id)
     if not isinstance(fields, dict) or set(fields) != {"poNumber"}:
         raise ToolError("supplier question fields may contain only poNumber")
+    if template_id not in {t.value for t in Template}:
+        raise ToolError(f"templateId must be one of {', '.join(t.value for t in Template)} (BR-19)")
     try:
         facts = load_facts(ctx.cases, ctx.sap, case_id, signals=ctx.signals)
         question = render_question(

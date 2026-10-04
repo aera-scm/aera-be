@@ -739,3 +739,15 @@ def test_srd_6_5_propose_plan_tells_the_model_the_plan_shape() -> None:
 def test_br_02_a_piece_quantity_matches_any_piece_unit_code(unit: str) -> None:
     """S/4 may return the internal code ST (Stueck) where a supplier writes PC."""
     assert calc._quantity("640 PC", unit) == Decimal(640)
+
+
+def test_br_19_invented_template_is_refused_with_the_allowed_list(ctx: ToolContext) -> None:
+    """Live 2026-10-04: the model asked for 'TMPL-READY-QTY'; the tool must name the valid ids."""
+    schema = BY_NAME["request_supplier_info"].input_schema()
+    with pytest.raises(ToolError, match="CONFIRM_PARTIAL_QTY"):
+        case_tools.request_supplier_info(ctx, CASE, "TMPL-READY-QTY", {"poNumber": "4500001234"})
+    assert schema["properties"]["templateId"]["enum"] == [
+        "CONFIRM_PARTIAL_QTY",
+        "CONFIRM_SHIP_DATE",
+        "REQUEST_TRACKING",
+    ]

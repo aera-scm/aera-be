@@ -185,7 +185,7 @@ def test_uc_05_unconfirmed_quantity_ends_the_run_with_a_planner_question(
     assert case is not None and case.status is CaseStatus.WAITING_PLANNER
     assert case.active_run_id is None
     ended = bus.details("RunEnded")[-1]["data"]
-    assert (ended["endReason"], ended["promptVersion"]) == ("WAITING_PLANNER", "supervisor_v5")
+    assert (ended["endReason"], ended["promptVersion"]) == ("WAITING_PLANNER", "supervisor_v6")
     kinds = [e.kind for e in TraceStore(ctx.dynamodb, ENV).events(CASE)]
     assert kinds == [
         "SYSTEM",

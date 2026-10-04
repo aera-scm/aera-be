@@ -479,6 +479,33 @@ def test_fr_imp_03_invented_costs_are_refused(ctx: ToolContext, photo: Signal) -
     assert "calc_option" in result["errors"][0]
 
 
+def test_fr_imp_03_actions_must_match_the_priced_option(ctx: ToolContext, photo: Signal) -> None:
+    """A transfer's price and coverage cannot carry air-freight actions it was not priced for."""
+    options = reference_options(ctx, photo)
+    by_id = {o["id"]: o for o in options}
+    by_id["C"]["actions"] = [*by_id["C"]["actions"], *by_id["A"]["actions"]]
+
+    result = case_tools.propose_plan(
+        ctx, CASE, {"options": options, "chosen": ["C"], "rationale": "x"}
+    )
+
+    assert result["accepted"] is False
+    assert any("option C" in e and "actions" in e for e in result["errors"])
+
+
+def test_fr_imp_03_changed_action_quantity_is_refused(ctx: ToolContext, photo: Signal) -> None:
+    options = reference_options(ctx, photo)
+    by_id = {o["id"]: o for o in options}
+    by_id["C"]["actions"] = [{**by_id["C"]["actions"][0], "qty": 900}]
+
+    result = case_tools.propose_plan(
+        ctx, CASE, {"options": options, "chosen": ["C"], "rationale": "x"}
+    )
+
+    assert result["accepted"] is False
+    assert any("option C" in e for e in result["errors"])
+
+
 @pytest.mark.parametrize(
     "plan",
     [

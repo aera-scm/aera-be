@@ -107,6 +107,7 @@ class Gatekeeper:
     audit: AuditWriter
     bus: Any
     env: str | None = None
+    phone_standins: Callable[[], dict[str, str]] | None = None
 
     def handle(self, signal_id: str) -> Signal | None:
         signal = self.signals.get(signal_id)
@@ -140,6 +141,8 @@ class Gatekeeper:
 
         channel = _sender_channel(signal)
         known = self.contacts()
+        if channel == "WHATSAPP" and self.phone_standins is not None:
+            known = with_phone_standins(known, self.phone_standins())
         partner = verify_sender(channel, signal.sender_id, known)
         if partner is None:
             return self._quarantine(signal, rejection_reason(channel, signal.sender_id, known))
@@ -211,11 +214,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         _gatekeeper = Gatekeeper(
             signals=SignalStore(dynamodb),
             raw=RawStore(runtime.client("s3"), runtime.raw_bucket()),
-            # ADR-0037: team phones standing in for SAP supplier numbers come from the secret.
-            contacts=lambda: with_phone_standins(
-                directory.contacts(),
-                dict(runtime.secret("channels/whatsapp").get("standins") or {}),
-            ),
+            contacts=directory.contacts,
+            phone_standins=lambda: dict(runtime.secret("channels/whatsapp").get("standins") or {}),
             guardrail=Guardrail(
                 runtime.client("bedrock-runtime"),
                 lambda: runtime.parameter("GUARDRAIL_ID"),

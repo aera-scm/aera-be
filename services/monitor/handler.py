@@ -77,9 +77,12 @@ class Monitor:
         return sum((number(r.data.get("QuantityInBaseUnit")) for r in rows), Decimal(0))
 
     def check(self, case_id: str, part_id: str) -> dict[str, Any]:
+        expected = self.expected_receipts(case_id, part_id)
+        if not expected:
+            return {"outcome": "IGNORED", "reason": "no successful execution receipts"}
         missing = [
             {"document": doc, "expected": str(qty), "received": str(got)}
-            for doc, qty in self.expected_receipts(case_id, part_id)
+            for doc, qty in expected
             if (got := self.received(doc)) < qty
         ]
         if missing:

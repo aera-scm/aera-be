@@ -93,3 +93,28 @@ def test_at_13_posted_goods_receipts_close_the_case_with_metrics(
         metrics
     )
     assert metrics["minutesToClosure"] is not None
+
+
+@pytest.mark.parametrize("part_id", ["deleted-before-reset", "part-C"])
+def test_fr_mon_02_stale_or_unexecuted_part_cannot_close_case(
+    world: dict[str, Any], dynamodb: Any, sap: SapClient, bus: RecordingBus, part_id: str
+) -> None:
+    monitor = Monitor(dynamodb=dynamodb, sap=sap, bus=bus, clock=lambda: T0, env=ENV)
+    before = status(world)
+
+    result = monitor.check(CASE, part_id)
+
+    assert result == {"outcome": "IGNORED", "reason": "no successful execution receipts"}
+    assert status(world) is before
+    assert monitor.control.get(CASE, f"RECEIVED#{part_id}") is None
+    assert "CaseClosed" not in bus.types()
+
+
+def test_fr_mon_02_unknown_part_cannot_close_executed_case(
+    executed: dict[str, Any], dynamodb: Any, sap: SapClient, bus: RecordingBus
+) -> None:
+    monitor = Monitor(dynamodb=dynamodb, sap=sap, bus=bus, clock=lambda: T0, env=ENV)
+
+    assert monitor.check(CASE, "deleted-before-reset")["outcome"] == "IGNORED"
+    assert status(executed) is CaseStatus.MONITORING
+    assert monitor.control.get(CASE, "RECEIVED#deleted-before-reset") is None

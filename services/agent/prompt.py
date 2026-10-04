@@ -60,8 +60,11 @@ def opening_message(
         [
             f"Mode: {mode}. Reason for this run: {reason or 'new case'}.",
             (
-                "Planner constraints for this plan (propose_plan enforces them): "
+                "Planner constraints for this plan (propose_plan enforces them on the chosen "
+                "options only): "
                 + json.dumps(constraints)
+                + ". Still price and propose two or three options; an option outside the "
+                "constraints may be listed but not chosen."
                 if constraints
                 else "No planner constraints."
             ),

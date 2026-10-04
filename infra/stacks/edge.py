@@ -140,6 +140,9 @@ class EdgeStack(Stack):
         # Admin (FR-ADM-01..03) edits config and resets the working tables; audit is kept.
         for name in ("cases", "audit", "trace", "connections", "config", "ledger", "dialogue"):
             tables[name].grant_read_write_data(api_fn)
+        # What-if (FR-SIM-03) re-reads facts like the Verifier, including SAP-derived supplier
+        # reliability (FR-LRN); read only.
+        tables["analytics"].grant_read_data(api_fn)
         tables["connections"].grant_read_write_data(realtime)
 
         # REST API ---------------------------------------------------------------------------

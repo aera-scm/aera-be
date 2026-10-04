@@ -332,3 +332,21 @@ def test_case_service_reservation_refuses_other_values(value: str) -> None:
     }
     with pytest.raises(ValueError, match="AERA_CASE_SERVICE_RESERVED_CONCURRENCY"):
         data_settings_from_environment(environ)
+
+
+def test_fr_sim_03_api_reads_supplier_reliability_for_what_if(
+    stacks: dict[str, assertions.Template],
+) -> None:
+    """Live 2026-10-04 (AT-19): what-if re-reads facts like the Verifier, including the
+    supplier reliability profile; without read access every what-if failed with HTTP 502."""
+    # CDK moves statements beyond the inline size limit into a managed policy.
+    policies = {
+        **stacks["edge"].find_resources("AWS::IAM::Policy"),
+        **stacks["edge"].find_resources("AWS::IAM::ManagedPolicy"),
+    }
+    api = [
+        json.dumps(p["Properties"]["PolicyDocument"])
+        for p in policies.values()
+        if "apiFunction" in json.dumps(p["Properties"].get("Roles", []))
+    ]
+    assert any("analytics" in doc.lower() and "dynamodb:GetItem" in doc for doc in api)

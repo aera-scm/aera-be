@@ -52,6 +52,16 @@ NEXT_STATUS = {
 }
 
 
+def grounding_query(material: str, plant: str) -> str:
+    """ADR-0040: RELEVANCE scores how well the rationale answers this question, so it is the
+    question a plan rationale answers (which action, how many, arriving when, at what cost),
+    not a title. Grounding of each sentence against the facts is unchanged."""
+    return (
+        f"Which actions does the recovery plan for {material} at plant {plant} choose, "
+        "with quantity, arrival and cost?"
+    )
+
+
 @dataclass
 class VerifierService:
     dynamodb: Any
@@ -133,7 +143,7 @@ class VerifierService:
         facts = EvidenceReader(ctx).gather(case, record.plan)
         chosen = [o for o in record.plan.options if o.id in record.plan.chosen]
         rationale = " ".join([record.plan.rationale, *(o.rationale for o in chosen)])
-        query = f"Recovery plan for {case.material} at plant {case.plant} ({case_id})"
+        query = grounding_query(case.material, case.plant)
         verification = verify(
             record.plan,
             facts.evidence,

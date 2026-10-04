@@ -231,7 +231,7 @@ def test_fr_ver_01_a_rate_changed_after_the_proposal_fails_the_reread(
 ) -> None:
     propose(ctx, photo, ["C"])
     rates = ctx.dynamodb.scan(TableName="aera-test-config")["Items"]
-    [sto] = [r for r in rates if r.get("actionType", {}).get("S") == "STO"]
+    [sto] = [r for r in rates if r.get("entryId", {}).get("S") == "RC-STO-1020-1010"]
     sto["fixedCostUsd"] = {"N": "9999"}
     ctx.dynamodb.put_item(TableName="aera-test-config", Item=sto)
 
@@ -424,3 +424,11 @@ def test_br_23_reference_approval_window_is_open_with_the_sto_in_place(
     [pending] = [p for p in route["parts"] if p["tier"] == 2]
     deadline = datetime.fromisoformat(str(pending["deadline"]))
     assert T0 < deadline <= T0 + timedelta(hours=4)
+
+
+def test_fr_ver_03_adr_0040_relevance_query_is_the_question_a_rationale_answers() -> None:
+    from services.verifier.service import grounding_query
+
+    query = grounding_query("MAT-48219", "1010")
+    assert query.endswith("?") and "MAT-48219" in query and "1010" in query
+    assert all(word in query for word in ("quantity", "arrival", "cost"))

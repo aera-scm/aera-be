@@ -331,3 +331,24 @@ def test_fr_adm_03_reset_restores_the_scenario_and_keeps_the_audit_trail(
     assert CaseStore(dynamodb, ENV).next_case_id(2026) == "EXC-2026-0914"
     assert AuditWriter(dynamodb, ENV).events(f"CASE#{CASE}")  # audit is never deleted
     assert AuditWriter(dynamodb, ENV).events("ADMIN")[-1].type == "ENVIRONMENT_RESET"
+
+
+@pytest.mark.parametrize("tier", [2, 3])
+def test_br_16_empty_route_still_explains_execution_refusal(
+    api: Api, dynamodb: Any, tier: int
+) -> None:
+    case(dynamodb)
+    dynamodb.update_item(
+        TableName="aera-test-cases",
+        Key={"PK": {"S": f"CASE#{CASE}"}, "SK": {"S": "META"}},
+        UpdateExpression="SET planVersion = :v",
+        ExpressionAttributeValues={":v": {"N": "1"}},
+    )
+    dynamodb.put_item(
+        TableName="aera-test-cases",
+        Item=to_item({"PK": f"CASE#{CASE}", "SK": "ROUTE#1", "tier": tier, "parts": []}),
+    )
+    answer = chat(api, "execute now")
+    assert answer["refused"] is True
+    assert "Chat cannot execute (BR-16)" in answer["reply"]
+    assert answer["replanRunId"] is None

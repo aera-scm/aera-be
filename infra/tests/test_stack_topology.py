@@ -163,3 +163,13 @@ def test_srd_6_19_console_security_headers() -> None:
     assert "font-src 'self' data: https://fonts.gstatic.com" in csp
     assert headers["FrameOptions"]["FrameOption"] == "DENY"
     assert headers["ContentTypeOptions"]["Override"] is True
+
+
+def test_srd_6_19_console_cache_respects_shell_no_cache() -> None:
+    app = build_app(DataSettings(env_name="dev", owner="synthetic-owner"))
+    template = assertions.Template.from_stack(Stack.of(app.node.find_child("aera-dev-web")))
+    [policy] = template.find_resources("AWS::CloudFront::CachePolicy").values()
+    config = policy["Properties"]["CachePolicyConfig"]
+    assert config["MinTTL"] == 0
+    assert config["DefaultTTL"] == 0
+    assert config["MaxTTL"] == 31536000

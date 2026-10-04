@@ -98,7 +98,7 @@ class Chat:
     def _execution_answer(self, case: Case) -> list[str]:
         limit = self.config.decimal("TIER1_MAX_USD")
         route = self._get(case.case_id, f"ROUTE#{case.plan_version}") if case.plan_version else None
-        if route is None:
+        if route is None or not route.get("parts"):
             return ["Chat cannot execute (BR-16). A plan runs only after verification and routing."]
         answer = []
         for part in route["parts"]:

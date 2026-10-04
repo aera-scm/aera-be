@@ -81,7 +81,15 @@ class WebStack(Stack):
                 origin=origins.S3BucketOrigin.with_origin_access_control(bucket),
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 response_headers_policy=headers,
-                cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+                cache_policy=cloudfront.CachePolicy(
+                    self,
+                    "ConsoleCache",
+                    min_ttl=Duration.seconds(0),
+                    default_ttl=Duration.seconds(0),
+                    max_ttl=Duration.days(365),
+                    enable_accept_encoding_gzip=True,
+                    enable_accept_encoding_brotli=True,
+                ),
             ),
             # Single-page application: every deep link loads the console shell.
             error_responses=[

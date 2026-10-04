@@ -131,6 +131,17 @@ class PortfolioService:
                 arguments["ExclusiveStartKey"] = page["LastEvaluatedKey"]
         return sorted(found, key=lambda pair: pair[0].case_id)
 
+    def committed(self, case: Case) -> set[str]:
+        """Options of parts already auto-approved (Tier 1) or approved: their stock is held in
+        the ledger and so already left out of donor capacity; they are not candidates again."""
+        route = self._item(case.case_id, f"ROUTE#{case.plan_version}")
+        taken: set[str] = set()
+        for part in (route or {}).get("parts") or []:
+            record = self._item(case.case_id, f"PART#{part['id']}") or {}
+            if int(part.get("tier") or 0) == 1 or record.get("decision") == "APPROVED":
+                taken.update(str(option) for option in part.get("options") or [])
+        return taken
+
     def _config_item(self, key: str) -> dict[str, Any] | None:
         item = self.ctx.dynamodb.get_item(
             TableName=self._config, Key={"PK": {"S": key}}, ConsistentRead=True
@@ -282,7 +293,17 @@ class PortfolioService:
         rates = {rate.source_ref: rate for rate in self.ctx.rates.entries()}
         for case, record in members:
             inputs.needs.extend(self.needs(case))
+            taken = self.committed(case)
             for option in record.plan.options:
+                if option.id in taken:
+                    inputs.excluded.append(
+                        {
+                            "caseId": case.case_id,
+                            "optionId": option.id,
+                            "reason": "already approved; its stock is held (BR-08)",
+                        }
+                    )
+                    continue
                 resources = self._resources(case, option, inputs)
                 rate = rates.get(option.cost_source_ref)
                 if resources is None or rate is None:

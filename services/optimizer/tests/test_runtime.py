@@ -272,3 +272,23 @@ def test_v_15_plan_must_match_the_latest_portfolio_allocation(
     over = _portfolio_check(plan, selected, {"C": Decimal(200), "A": Decimal(640)})
     assert not over.passed and over.blocking and "allocated 200" in over.detail
     assert not _portfolio_check(plan, selected, {}).passed
+
+
+def test_br_08_an_auto_approved_transfer_is_not_offered_again(competing: ToolContext) -> None:
+    """The reference transfer already ran as Tier 1 (BR-22): its 600 PC are held in the
+    ledger, so the portfolio must not count that option as a free candidate a second time."""
+    competing.dynamodb.put_item(
+        TableName=f"aera-{ENV}-cases",
+        Item=to_item(
+            {
+                "PK": f"CASE#{CASE}",
+                "SK": "ROUTE#1",
+                "tier": 2,
+                "parts": [{"id": "p1", "options": ["C"], "tier": 1}],
+            }
+        ),
+    )
+    record = PortfolioService(competing, solver, Decimal("2")).solve_for(OTHER)
+    assert record is not None
+    assert not any(c["id"] == f"{CASE}/C" for c in record["candidateActions"])
+    assert any(e["optionId"] == "C" and e["caseId"] == CASE for e in record["excluded"])

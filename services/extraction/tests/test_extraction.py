@@ -5,7 +5,12 @@ from typing import Any
 import pytest
 
 from services.conftest import RAW_BUCKET, RecordingBus
-from services.extraction.handler import Extraction, text_readings, textract_readings
+from services.extraction.handler import (
+    Extraction,
+    text_quantities,
+    text_readings,
+    textract_readings,
+)
 from services.extraction.multilingual import BedrockLocator, Word, verified_spans
 from services.gatekeeper.handler import Guardrail
 from services.shared.audit import AuditWriter
@@ -309,3 +314,24 @@ def test_fr_lng_01_locator_reads_json_wrapped_in_a_code_fence() -> None:
         "QUANTITY": "640 PC",
         "PO_NUMBER": "4500001234",
     }
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Referenz: 7BB4E1514DC745C53025AF96. Bestellung 4500001262: 200 Stück sind versandbereit.",
+        "PO 4500001262: 200 pcs are ready to ship.",
+        "Pesanan 4500001262: 200 buah siap dikirim.",
+        "PO 4500001262 - 200 PC ready",
+    ],
+)
+def test_fr_neg_03_a_text_reply_states_its_quantity_in_order_pieces(text: str) -> None:
+    """Live 2026-10-04 (AT-20): a supplier's text reply "200 Stück" yielded no QUANTITY."""
+    quantity = text_quantities(text)
+    assert [(r.value, r.confidence) for r in quantity] == [("200 PC", 1.0)]
+
+
+def test_br_02_two_quantities_in_one_text_are_both_uncertain() -> None:
+    readings = text_quantities("PO 4500001262: 200 Stück jetzt, 100 Stück nächste Woche.")
+    quantity = sorted((r.value, r.confidence) for r in readings)
+    assert quantity == [("100 PC", 0.5), ("200 PC", 0.5)]

@@ -47,6 +47,11 @@ _MATERIAL = re.compile(r"\b(MAT-\d{5})\b")
 _ETA = re.compile(r"\bETA (\d{4}-\d{2}-\d{2}T[0-9:.]+Z?)")
 _TRACKING = re.compile(r"\btracking ([A-Z0-9-]{4,40})")
 _STATUS = re.compile(r"^Carrier status ([A-Z_]{3,30})")
+_QTY = re.compile(
+    r"(?<![\w.,])(\d{1,3}(?:[.,]\d{3})+|\d{1,6})\s*"
+    r"(?:pcs|pc|pieces?|stück|stueck|stk|units?|buah)(?!\w)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -100,6 +105,17 @@ def text_readings(text: str) -> list[Reading]:
     readings = [Reading("PO_NUMBER", po, 1.0) for po in dict.fromkeys(_PO.findall(text))]
     readings += [Reading("MATERIAL", m, 1.0) for m in dict.fromkeys(_MATERIAL.findall(text))]
     return readings
+
+
+def text_quantities(text: str) -> list[Reading]:
+    """ADR-0041: in a typed message without documents, a number written with a piece unit
+    (EN, DE, ID) is a quantity in pieces. One is read literally; several are ambiguous and
+    stay UNCONFIRMED (BR-02). A document's quantity always comes from Textract instead."""
+    quantities = list(
+        dict.fromkeys(m.replace(",", "").replace(".", "") for m in _QTY.findall(text))
+    )
+    confidence = 1.0 if len(quantities) == 1 else 0.5
+    return [Reading("QUANTITY", f"{q} PC", confidence) for q in quantities]
 
 
 def carrier_readings(text: str) -> list[Reading]:
@@ -167,6 +183,8 @@ class Extraction:
         for key in signal.attachments:
             if key.lower().endswith(DOCUMENT_SUFFIXES):
                 documents.append(textract_document(self.textract, self.bucket, key))
+        if not documents:
+            readings += text_quantities(signal.normalized_text or "")
         scanned = "\n".join(text for _, text, _ in documents if text)
         if scanned:
             scan = self.guardrail.scan(scanned)

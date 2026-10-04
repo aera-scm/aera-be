@@ -36,3 +36,15 @@ def test_srd_6_19_index_is_never_cached_and_hashed_assets_are_immutable(tmp_path
         "public, max-age=31536000, immutable",
     )
     assert uploads["brand/logo.png"] == ("image/png", "public, max-age=3600")
+
+
+@pytest.mark.parametrize(
+    "name", [".env", ".env.production", "private.pem", "private.key", "secrets/export.json"]
+)
+def test_nfr_sec_03_secret_files_refuse_entire_upload(tmp_path: Path, name: str) -> None:
+    (tmp_path / "index.html").write_text("<html></html>", encoding="utf-8")
+    sensitive = tmp_path / name
+    sensitive.parent.mkdir(parents=True, exist_ok=True)
+    sensitive.write_text("synthetic-sensitive-file", encoding="utf-8")
+    with pytest.raises(ValueError, match="sensitive"):
+        deploy_console.plan_upload("dev", tmp_path)

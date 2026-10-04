@@ -18,6 +18,8 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
+import boto3
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -42,7 +44,17 @@ def plan_upload(env: str, dist: Path) -> list[tuple[str, Path, str, str]]:
     if not (dist / "index.html").is_file():
         raise ValueError(f"{dist} has no index.html; build the console first")
     plan = []
-    for path in sorted(p for p in dist.rglob("*") if p.is_file()):
+    for path in sorted(dist.rglob("*")):
+        relative = path.relative_to(dist)
+        if (
+            path.is_symlink()
+            or any(part.lower() == "secrets" for part in relative.parts)
+            or path.name.lower().startswith(".env")
+            or path.suffix.lower() in {".pem", ".key"}
+        ):
+            raise ValueError("console build contains a sensitive file or symbolic link")
+        if not path.is_file():
+            continue
         key = path.relative_to(dist).as_posix()
         kind = TYPES.get(path.suffix.lower()) or mimetypes.guess_type(path.name)[0]
         if key == "index.html":
@@ -68,8 +80,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     plan = plan_upload(args.env, args.dist)
 
-    import boto3
-
     session = boto3.Session(profile_name=args.profile, region_name="us-east-1")
     found = outputs(session.client("cloudformation"), f"aera-{args.env}-web")
     bucket, distribution = found["ConsoleBucket"], found["ConsoleDistributionId"]
@@ -82,7 +92,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     session.client("cloudfront").create_invalidation(
         DistributionId=distribution,
         InvalidationBatch={
-            "Paths": {"Quantity": 1, "Items": ["/index.html"]},
+            "Paths": {"Quantity": 1, "Items": ["/*"]},
             "CallerReference": f"console-{int(time.time())}",
         },
     )

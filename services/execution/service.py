@@ -31,6 +31,7 @@ from services.execution.workflow import (
     Transfer,
     Workflow,
 )
+from services.optimizer.runtime import donor_allocation
 from services.routing.store import ControlStore
 from services.shared.audit import AuditWriter
 from services.shared.case_state import can_transition
@@ -175,6 +176,15 @@ class ExecutionService:
             fresh = self._transfer(transfer.material, transfer.plant, transfer.quantity)
             if fresh.available < transfer.quantity:
                 return False
+        # V-15 (BR-20): a later portfolio solve may have given this donor stock to another case.
+        given = donor_allocation(
+            self.control.get(execution.case_id, "PORTFOLIO"), execution.case_id
+        )
+        if given is not None and any(
+            transfer.quantity > given.get(f"DONOR#{transfer.material}#{transfer.plant}", Decimal(0))
+            for transfer in execution.transfers
+        ):
+            return False
         for step in execution.steps:
             action = step.action
             if action.type == "SPLIT_PO_SCHEDULE_LINE" and step.substep == 0:

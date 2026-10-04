@@ -12,8 +12,9 @@
 import json
 from typing import Any
 
-from aws_cdk import Duration, Fn, Stack
+from aws_cdk import Duration, Fn, IgnoreMode, Stack
 from aws_cdk import aws_bedrock as bedrock
+from aws_cdk import aws_ecr_assets as ecr_assets
 from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
@@ -26,7 +27,7 @@ from aws_cdk import aws_stepfunctions as sfn
 from constructs import Construct
 
 from infra.constructs.execution_workflow import definition
-from infra.constructs.service_function import ServiceFunction
+from infra.constructs.service_function import ROOT, ServiceFunction
 from infra.environments import require_deployable_environment
 from infra.stacks.data import DataStack
 from infra.stacks.reasoning_policy import add_reasoning_policy
@@ -445,6 +446,35 @@ class ControlStack(Stack):
             )
         )
         scheduler_role.grant_pass_role(verifier.grant_principal)
+        # Portfolio optimiser (SRD 6.11, BR-20): CP-SAT in its own container, called by the
+        # Verifier only; it reads nothing and writes nothing (pure function of its input).
+        optimizer = lambda_.DockerImageFunction(
+            self,
+            "optimizer",
+            function_name=f"aera-{env_name}-optimizer",
+            code=lambda_.DockerImageCode.from_image_asset(
+                str(ROOT),
+                file="services/optimizer/Dockerfile",
+                platform=ecr_assets.Platform.LINUX_AMD64,
+                ignore_mode=IgnoreMode.DOCKER,
+                exclude=[
+                    "**",
+                    "!pyproject.toml",
+                    "!uv.lock",
+                    "!services/__init__.py",
+                    "!services/optimizer/",
+                    "!services/optimizer/**",
+                    "**/tests/",
+                    "**/__pycache__/",
+                    "**/*.pyc",
+                ],
+            ),
+            architecture=lambda_.Architecture.X86_64,
+            memory_size=1024,
+            timeout=Duration.seconds(15),
+        )
+        optimizer.grant_invoke(verifier)
+        verifier.add_environment("AERA_OPTIMIZER_FUNCTION", optimizer.function_name)
         events.Rule(
             self,
             "OnPlanProposed",

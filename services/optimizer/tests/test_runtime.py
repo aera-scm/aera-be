@@ -292,3 +292,19 @@ def test_br_08_an_auto_approved_transfer_is_not_offered_again(competing: ToolCon
     assert record is not None
     assert not any(c["id"] == f"{CASE}/C" for c in record["candidateActions"])
     assert any(e["optionId"] == "C" and e["caseId"] == CASE for e in record["excluded"])
+
+
+def test_fr_cht_01_planner_constraints_bind_the_portfolio(competing: ToolContext) -> None:
+    """Live 2026-10-04 (AT-10): under "under USD 30,000" the solver added the USD 38,200 air
+    option back into the reference plan. An option outside the constraints is never offered."""
+    competing.dynamodb.put_item(
+        TableName=f"aera-{ENV}-cases",
+        Item=to_item({"PK": f"CASE#{CASE}", "SK": "CONSTRAINTS", "maxCostUsd": 30000}),
+    )
+    record = PortfolioService(competing, solver, Decimal("2")).solve_for(CASE)
+    assert record is not None
+    assert not any(c["id"] == f"{CASE}/A" for c in record["candidateActions"])
+    assert any(
+        e["optionId"] == "A" and "constraints" in e["reason"] and e["caseId"] == CASE
+        for e in record["excluded"]
+    )

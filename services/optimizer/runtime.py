@@ -24,7 +24,7 @@ import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import ROUND_FLOOR, Decimal
 from typing import Any
 
@@ -35,6 +35,7 @@ from services.shared.dynamo import from_item, table_name, to_item
 from services.shared.models import Case, CaseStatus, Option, PlanRecord, ProposedPlan
 from services.shared.runtime import emit
 from services.shared.triage import SALES, odata_quote
+from services.tools.case_tools import ACTION_OF, constraint_breaches
 from services.tools.context import ToolContext
 from services.tools.sap_tools import component_requirements, stock_position
 
@@ -294,7 +295,17 @@ class PortfolioService:
         for case, record in members:
             inputs.needs.extend(self.needs(case))
             taken = self.committed(case)
+            limits = self._item(case.case_id, "CONSTRAINTS") or {}
             for option in record.plan.options:
+                if not within_constraints(option, limits):
+                    inputs.excluded.append(
+                        {
+                            "caseId": case.case_id,
+                            "optionId": option.id,
+                            "reason": "outside the planner's constraints (FR-CHT-01)",
+                        }
+                    )
+                    continue
                 if option.id in taken:
                     inputs.excluded.append(
                         {
@@ -422,6 +433,18 @@ class PortfolioService:
         return record
 
 
+def within_constraints(option: Option, limits: dict[str, Any]) -> bool:
+    """FR-CHT-01: an option the planner ruled out is never offered to the solver."""
+    if "maxCostUsd" in limits and option.cost_usd > Decimal(str(limits["maxCostUsd"])):
+        return False
+    excluded = {x for x in str(limits.get("excludedActions") or "").split(",") if x}
+    if excluded and any(ACTION_OF.get(x) in {a.type for a in option.actions} for x in excluded):
+        return False
+    if "needBy" in limits and option.arrival.date() > date.fromisoformat(str(limits["needBy"])):
+        return False
+    return True
+
+
 def allocation_for(record: dict[str, Any] | None, case_id: str) -> dict[str, Decimal] | None:
     """V-15 input: option id -> allocated quantity for this case; None without a portfolio
     or when the solver found no feasible allocation (the case is then escalated, FR-OPZ-05)."""
@@ -511,7 +534,7 @@ def resized_plan(
         options.append(option)
     chosen = sorted(allocation)
     selected = [o for o in options if o.id in chosen]
-    return ProposedPlan.model_validate(
+    revised = ProposedPlan.model_validate(
         {
             "caseId": case.case_id,
             "planVersion": record.plan.plan_version + 1,
@@ -522,3 +545,5 @@ def resized_plan(
             "rationale": " ".join(sentences),
         }
     )
+    # FR-CHT-01: the solver's sizing must still respect the planner's constraints.
+    return None if constraint_breaches(ctx, case.case_id, revised) else revised

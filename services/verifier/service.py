@@ -252,9 +252,13 @@ class VerifierService:
         self.audit.record(
             f"CASE#{case_id}",
             "PLAN_RESIZED",
-            actor="optimizer",
+            actor="system",
             case_id=case_id,
-            payload={"planVersion": plan.plan_version, "portfolioId": portfolio_id},
+            payload={
+                "planVersion": plan.plan_version,
+                "portfolioId": portfolio_id,
+                "resizedBy": "optimizer",
+            },
         )
         self._emit("PlanProposed", case_id, {"planVersion": plan.plan_version})
         return {"resized": plan.plan_version, "portfolioId": portfolio_id}

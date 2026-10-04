@@ -20,7 +20,7 @@ from services.conftest import RAW_BUCKET, RecordingBus
 from services.routing.store import ControlStore
 from services.shared.dynamo import to_item
 from services.shared.intake import Intake
-from services.shared.models import CaseStatus, Signal
+from services.shared.models import CaseStatus, PlanRecord, Signal
 from services.shared.signals import RawStore
 from services.tools import case_tools
 from services.tools.context import ToolContext
@@ -432,3 +432,28 @@ def test_fr_ver_03_adr_0040_relevance_query_is_the_question_a_rationale_answers(
     query = grounding_query("MAT-48219", "1010")
     assert query.endswith("?") and "MAT-48219" in query and "1010" in query
     assert all(word in query for word in ("quantity", "arrival", "cost"))
+
+
+def test_fr_opz_03_a_resized_plan_is_recorded_audited_and_proposed(
+    ctx: ToolContext,  # noqa: F811
+    photo: Signal,  # noqa: F811
+    verifier: VerifierService,
+    bus: RecordingBus,
+) -> None:
+    """Live 2026-10-04: the resize audit used actor "optimizer", which the audit schema
+    refuses; the new version was written but never announced."""
+    from services.shared.audit import AuditWriter
+    from services.shared.models import ProposedPlan
+
+    propose(ctx, photo, ["C", "A"])
+    record = PlanRecord.from_stored(ControlStore(ctx.dynamodb, ENV).get(CASE, "PLAN#1") or {})
+    revised = ProposedPlan.model_validate(
+        {**record.plan.model_dump(mode="json", by_alias=True), "planVersion": 2}
+    )
+
+    result = verifier._propose_resized(revised, "PF-test", T0)
+
+    assert result == {"resized": 2, "portfolioId": "PF-test"}
+    assert bus.details("PlanProposed")[-1]["data"] == {"caseId": CASE, "planVersion": 2}
+    events = AuditWriter(ctx.dynamodb, ENV).events(f"CASE#{CASE}")
+    assert events[-1].type == "PLAN_RESIZED" and events[-1].payload["resizedBy"] == "optimizer"

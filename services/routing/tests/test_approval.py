@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -150,4 +151,4 @@ def test_fr_adm_01_an_approver_limit_edited_by_an_admin_still_routes(dynamodb: A
     [limit] = [
         x for x in ControlStore(dynamodb, "test").limits() if x.user_id == "backup@example.test"
     ]
-    assert (limit.plant, limit.limit_usd) == ("1030", 90000)
+    assert (limit.plant, limit.limit_usd) == ("1030", Decimal(90000))

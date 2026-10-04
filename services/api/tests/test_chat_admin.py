@@ -352,3 +352,93 @@ def test_br_16_empty_route_still_explains_execution_refusal(
     assert answer["refused"] is True
     assert "Chat cannot execute (BR-16)" in answer["reply"]
     assert answer["replanRunId"] is None
+
+
+def test_adr_0021_admin_sets_freight_capacity_and_customer_priority(
+    api: Api, dynamodb: Any
+) -> None:
+    freight = {
+        "kind": "FREIGHT",
+        "supplierId": "1000234",
+        "plant": "1010",
+        "qtyPerDay": 1500,
+        "validFrom": "2026-01-01",
+        "validTo": "2026-12-31",
+    }
+    ok = api.handle(
+        call(
+            "PUT",
+            "/admin/portfolio-inputs/{id}",
+            groups="admin",
+            body=freight,
+            params={"id": "FREIGHT-1000234-1010"},
+        )
+    )
+    prio = api.handle(
+        call(
+            "PUT",
+            "/admin/portfolio-inputs/{id}",
+            groups="admin",
+            body={"kind": "PRIO", "customerId": "3000306", "weight": 3},
+            params={"id": "PRIO-3000306"},
+        )
+    )
+    too_heavy = api.handle(
+        call(
+            "PUT",
+            "/admin/portfolio-inputs/{id}",
+            groups="admin",
+            body={"kind": "PRIO", "customerId": "3000306", "weight": 9},
+            params={"id": "PRIO-3000306"},
+        )
+    )
+    denied = api.handle(
+        call(
+            "PUT",
+            "/admin/portfolio-inputs/{id}",
+            groups="planner",
+            body=freight,
+            params={"id": "FREIGHT-1000234-1010"},
+        )
+    )
+    assert (ok["statusCode"], prio["statusCode"]) == (200, 200)
+    assert too_heavy["statusCode"] == 400 and denied["statusCode"] == 403
+    settings = json.loads(
+        api.handle(call("GET", "/admin/settings", groups="admin", body=None))["body"]
+    )
+    keys = {row["PK"] for row in settings["portfolioInputs"]}
+    assert {"FREIGHT#1000234#1010", "PRIO#3000306"} <= keys
+    changes = AuditWriter(dynamodb, ENV).events("ADMIN")
+    assert [e.type for e in changes].count("PORTFOLIO_INPUT_CHANGED") == 2
+
+
+def test_fr_opz_04_case_portfolio_view(api: Api, dynamodb: Any) -> None:
+    case(dynamodb)
+    missing = api.handle(
+        call("GET", "/cases/{id}/portfolio", groups="planner", body=None, params={"id": CASE})
+    )
+    dynamodb.put_item(
+        TableName="aera-test-cases",
+        Item=to_item(
+            {
+                "PK": f"CASE#{CASE}",
+                "SK": "PORTFOLIO",
+                "portfolioId": "PF-1",
+                "caseIds": [CASE, "EXC-2026-0950"],
+                "candidateActions": [{"id": f"{CASE}/A"}],
+                "solverStatus": "OPTIMAL",
+                "objective": 1000,
+                "singleObjective": 2500,
+                "savingVsSingle": 1500,
+                "allocations": [{"candidateId": f"{CASE}/A", "caseId": CASE, "quantity": 640}],
+                "inputsHash": "x",
+            }
+        ),
+    )
+    found = api.handle(
+        call("GET", "/cases/{id}/portfolio", groups="planner", body=None, params={"id": CASE})
+    )
+    assert missing["statusCode"] == 404 and found["statusCode"] == 200
+    body = json.loads(found["body"])
+    assert (body["portfolioId"], body["savingVsSingle"]) == ("PF-1", 1500)
+    assert "inputsHash" not in body

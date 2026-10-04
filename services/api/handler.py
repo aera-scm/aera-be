@@ -47,6 +47,7 @@ from services.shared.models import (
     Case,
     CaseStatus,
     FieldStatus,
+    Portfolio,
     SignalChannel,
     SignalStatus,
     new_ulid,
@@ -178,6 +179,10 @@ class Api:
                     )
                 if resource == "/admin/rate-card/{id}":
                     return self._admin(lambda admin: admin.set_rate(params["id"], payload, actor))
+                if resource == "/admin/portfolio-inputs/{id}":
+                    return self._admin(
+                        lambda admin: admin.set_portfolio_input(params["id"], payload, actor)
+                    )
                 if resource == "/admin/approvers/{id}":
                     return self._admin(
                         lambda admin: admin.set_approver(params["id"], payload, actor)
@@ -350,6 +355,21 @@ class Api:
         if resource == "/lab/runs/{id}":
             _require(user, ADMINS)
             return http.response(200, self._lab(lambda lab: lab.get(params["id"])))
+        if resource == "/cases/{id}/portfolio":
+            case = self._case(params["id"])
+            item = self.dynamodb.get_item(
+                TableName=self._cases_table,
+                Key={"PK": {"S": f"CASE#{case.case_id}"}, "SK": {"S": "PORTFOLIO"}},
+                ConsistentRead=True,
+            ).get("Item")
+            if item is None:
+                raise Problem(404, "No portfolio", "this case competes with no other case")
+            stored = from_item(item, keep_decimals=False)
+            fields = set(Portfolio.model_fields) | {
+                f.alias for f in Portfolio.model_fields.values() if f.alias
+            }
+            portfolio = Portfolio.model_validate({k: v for k, v in stored.items() if k in fields})
+            return http.response(200, portfolio.model_dump(mode="json", by_alias=True))
         if resource == "/cases/{id}/projection":
             case = self._case(params["id"])
             return self._sim(lambda ctx: whatif.projection(ctx, case, http.query(event, "option")))

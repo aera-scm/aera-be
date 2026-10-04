@@ -81,6 +81,19 @@ RATE_CARD: tuple[RateCardEntry, ...] = (
         "validFrom": "2026-01-01",
         "validTo": "9999-12-31",
     },
+    # Synthetic: plant 1030 draws on the same 1020 donor stock, so two cases can compete
+    # for it (AT-09, AT-18).
+    {
+        "entryId": "RC-STO-1020-1030",
+        "actionType": "STO",
+        "fromPlant": "1020",
+        "toPlant": "1030",
+        "unitCostUsd": Decimal("0"),
+        "fixedCostUsd": Decimal("3900"),
+        "leadTimeHours": Decimal("6"),
+        "validFrom": "2026-01-01",
+        "validTo": "9999-12-31",
+    },
     {
         "entryId": "RC-AIR-1000234",
         "actionType": "AIR_FREIGHT",
@@ -103,6 +116,40 @@ RATE_CARD: tuple[RateCardEntry, ...] = (
         "validTo": "9999-12-31",
     },
 )
+
+
+class PortfolioInput(TypedDict):
+    kind: str
+    supplierId: NotRequired[str]
+    plant: NotRequired[str]
+    qtyPerDay: NotRequired[Decimal]
+    customerId: NotRequired[str]
+    weight: NotRequired[Decimal]
+    validFrom: NotRequired[str]
+    validTo: NotRequired[str]
+
+
+# ADR-0021 portfolio inputs (owner decision 2026-10-04): administered freight capacity per
+# supplier and receiving plant, and customer priority weights (1 to 3, default 1 when absent).
+# Synthetic demo entry: the reference supplier can fly 2,000 PC a day into plant 1010.
+PORTFOLIO_INPUTS: tuple[PortfolioInput, ...] = (
+    {
+        "kind": "FREIGHT",
+        "supplierId": "1000234",
+        "plant": "1010",
+        "qtyPerDay": Decimal("2000"),
+        "validFrom": "2026-01-01",
+        "validTo": "9999-12-31",
+    },
+)
+
+
+def portfolio_key(entry: PortfolioInput) -> str:
+    """Config table key: `FREIGHT#{supplier}#{plant}` or `PRIO#{customer}`."""
+    if entry["kind"] == "FREIGHT":
+        return f"FREIGHT#{entry['supplierId']}#{entry['plant']}"
+    return f"PRIO#{entry['customerId']}"
+
 
 # DR-12 approver limits (OI-06): synthetic users until the owner names real ones. The
 # backup approver covers the USD 42,300 reference plan (BR-23).

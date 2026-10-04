@@ -455,3 +455,34 @@ def test_an_unapproved_part_leaves_the_case_untouched(world: dict[str, Any]) -> 
     with pytest.raises(PermissionError):
         dispatch(world["service"], {"caseId": CASE, "planPartId": "part-A", "step": "Execute"})
     assert status(world) is CaseStatus.AWAITING_APPROVAL
+
+
+def test_v_15_portfolio_reallocation_aborts_the_transfer_before_any_write(
+    world: dict[str, Any], sap: SapClient, dynamodb: Any, bus: RecordingBus
+) -> None:
+    """BR-20: a later portfolio solve gave the 1020 stock to another case; the approved
+    transfer must not run (RevalidatePlan), and the case returns to planning."""
+    before = purchase_orders(sap)
+    dynamodb.put_item(
+        TableName="aera-test-cases",
+        Item=to_item(
+            {
+                "PK": f"CASE#{CASE}",
+                "SK": "PORTFOLIO",
+                "portfolioId": "PF-test",
+                "candidateActions": [
+                    {"id": f"{CASE}/C", "resources": ["DONOR#MAT-48219#1020"]},
+                    {"id": "EXC-2026-0950/C", "resources": ["DONOR#MAT-48219#1020"]},
+                ],
+                "allocations": [
+                    {"candidateId": "EXC-2026-0950/C", "caseId": "EXC-2026-0950", "quantity": 600}
+                ],
+            }
+        ),
+    )
+
+    path = run_state_machine(world, "part-C")
+
+    assert path == ["CheckKillSwitch", "Execute", "ReturnToPlanning"]
+    assert purchase_orders(sap) == before
+    assert bus.details("CaseReadyForRun")[-1]["data"]["reason"] == "stale plan"

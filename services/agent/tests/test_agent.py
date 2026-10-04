@@ -185,7 +185,7 @@ def test_uc_05_unconfirmed_quantity_ends_the_run_with_a_planner_question(
     assert case is not None and case.status is CaseStatus.WAITING_PLANNER
     assert case.active_run_id is None
     ended = bus.details("RunEnded")[-1]["data"]
-    assert (ended["endReason"], ended["promptVersion"]) == ("WAITING_PLANNER", "supervisor_v4")
+    assert (ended["endReason"], ended["promptVersion"]) == ("WAITING_PLANNER", "supervisor_v6")
     kinds = [e.kind for e in TraceStore(ctx.dynamodb, ENV).events(CASE)]
     assert kinds == [
         "SYSTEM",
@@ -428,3 +428,27 @@ def test_br_02_prompt_v4_routes_an_unconfirmed_partial_quantity_to_the_planner()
 
     assert "`QUANTITY`" in text and "`qtyFieldId`" in text
     assert "do not drop the partial" in text
+
+
+def test_fr_cht_01_at_10_constraints_bind_the_chosen_options_not_the_listed_ones() -> None:
+    """Live 2026-10-04: under "under USD 30,000" the agent escalated because only one option
+    fit; the constraint limits what is chosen, the plan still lists two or three options."""
+    from datetime import UTC, datetime
+
+    from services.agent.prompt import opening_message
+    from services.shared.models import Case, CaseStatus
+
+    now = datetime(2026, 10, 4, tzinfo=UTC)
+    case = Case(
+        case_id="EXC-2026-0914",
+        type="MRP_EXCEPTION",
+        material="MAT-48219",
+        plant="1010",
+        status=CaseStatus.INVESTIGATING,
+        created_at=now,
+        updated_at=now,
+    )
+    text = opening_message(
+        case, [], mode="replan", reason="planner chat", constraints={"maxCostUsd": "30000"}
+    )
+    assert "chosen options only" in text and "may be listed but not chosen" in text

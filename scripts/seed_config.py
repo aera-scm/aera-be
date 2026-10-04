@@ -32,11 +32,17 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from infra.config_defaults import APPROVER_LIMITS, CONFIG_DEFAULTS, RATE_CARD  # noqa: E402
+from infra.config_defaults import (  # noqa: E402
+    APPROVER_LIMITS,
+    CONFIG_DEFAULTS,
+    PORTFOLIO_INPUTS,
+    RATE_CARD,
+)
 from infra.environments import (  # noqa: E402
     EnvironmentRefusedError,
     require_deployable_environment,
 )
+from services.shared.defaults import portfolio_key  # noqa: E402
 
 SEED_ACTOR = "seed"
 
@@ -93,6 +99,15 @@ def approver_items(changed_at: str) -> list[dict[str, Any]]:
     ]
 
 
+def portfolio_items(changed_at: str) -> list[dict[str, Any]]:
+    """ADR-0021: freight capacity and customer priority entries."""
+    items = []
+    for entry in PORTFOLIO_INPUTS:
+        prefix, _, key = portfolio_key(entry).partition("#")
+        items.append(_record(prefix, key, entry, changedBy=SEED_ACTOR, changedAt=changed_at))
+    return items
+
+
 def seed(client: DynamoDBClient, *, env_name: str, changed_at: str) -> SeedResult:
     try:
         require_deployable_environment(env_name)
@@ -103,7 +118,12 @@ def seed(client: DynamoDBClient, *, env_name: str, changed_at: str) -> SeedResul
         raise SeedRefusedError("; ".join(problems))
 
     written, preserved = [], []
-    items = config_items(changed_at) + rate_card_items(changed_at) + approver_items(changed_at)
+    items = (
+        config_items(changed_at)
+        + rate_card_items(changed_at)
+        + approver_items(changed_at)
+        + portfolio_items(changed_at)
+    )
     for item in items:
         key = item["PK"]["S"]
         try:

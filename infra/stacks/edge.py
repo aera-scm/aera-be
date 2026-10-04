@@ -140,6 +140,9 @@ class EdgeStack(Stack):
         # Admin (FR-ADM-01..03) edits config and resets the working tables; audit is kept.
         for name in ("cases", "audit", "trace", "connections", "config", "ledger", "dialogue"):
             tables[name].grant_read_write_data(api_fn)
+        # What-if (FR-SIM-03) re-reads facts like the Verifier, including SAP-derived supplier
+        # reliability (FR-LRN); read only.
+        tables["analytics"].grant_read_data(api_fn)
         tables["connections"].grant_read_write_data(realtime)
 
         # REST API ---------------------------------------------------------------------------
@@ -213,11 +216,13 @@ class EdgeStack(Stack):
         signed(case.add_resource("approval"), "POST")
         signed(case.add_resource("projection"), "GET")
         signed(case.add_resource("whatif"), "POST")
+        signed(case.add_resource("portfolio"), "GET")
         admin = rest.root.add_resource("admin")
         signed(admin.add_resource("settings"), "GET")
         signed(admin.add_resource("config").add_resource("{key}"), "PUT")
         signed(admin.add_resource("rate-card").add_resource("{id}"), "PUT")
         signed(admin.add_resource("approvers").add_resource("{id}"), "PUT")
+        signed(admin.add_resource("portfolio-inputs").add_resource("{id}"), "PUT")
         signed(admin.add_resource("killswitch"), "POST")
         signed(admin.add_resource("reset"), "POST")
         signed(

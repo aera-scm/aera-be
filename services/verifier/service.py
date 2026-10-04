@@ -20,13 +20,20 @@ from decimal import Decimal
 from typing import Any
 
 from services.api import whatif
+from services.optimizer.runtime import (
+    PortfolioService,
+    Solver,
+    allocation_for,
+    conforms,
+    resized_plan,
+)
 from services.routing.logic import Policy, Route, route
 from services.routing.store import ControlStore
 from services.shared.audit import AuditWriter
 from services.shared.cases import CaseStore
 from services.shared.config import Config
 from services.shared.dynamo import table_name, to_item
-from services.shared.models import CaseStatus, PlanRecord
+from services.shared.models import CaseStatus, PlanRecord, ProposedPlan
 from services.shared.runtime import emit
 from services.shared.sap_client import SapClient
 from services.tools.context import ToolContext
@@ -45,6 +52,16 @@ NEXT_STATUS = {
 }
 
 
+def grounding_query(material: str, plant: str) -> str:
+    """ADR-0040: RELEVANCE scores how well the rationale answers this question, so it is the
+    question a plan rationale answers (which action, how many, arriving when, at what cost),
+    not a title. Grounding of each sentence against the facts is unchanged."""
+    return (
+        f"Which actions does the recovery plan for {material} at plant {plant} choose, "
+        "with quantity, arrival and cost?"
+    )
+
+
 @dataclass
 class VerifierService:
     dynamodb: Any
@@ -53,6 +70,8 @@ class VerifierService:
     grounding: GroundingCheck
     reasoning: ReasoningCheck | None = None
     scheduler: Any = None
+    # BR-20: the portfolio solver (optimizer Lambda); None where no optimizer is deployed.
+    solver: Solver | None = None
     timer_target_arn: str = ""
     scheduler_role_arn: str = ""
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
@@ -92,7 +111,7 @@ class VerifierService:
             return {"skipped": "plan missing"}
         for key in ("PK", "SK"):
             item.pop(key, None)
-        record = PlanRecord.model_validate(item)
+        record = PlanRecord.from_stored(item)
         # One verification moment: every re-read, projection and cover window is measured
         # from the same instant, so a boundary case (donor left at exactly its minimum
         # cover) does not fail on milliseconds between two clock readings (V-07).
@@ -105,10 +124,26 @@ class VerifierService:
             env=self.env,
             actor="verifier",
         )
+        allocation = None
+        if self.solver is not None:
+            portfolio = PortfolioService(
+                ctx, self.solver, self.config.decimal("DONOR_MIN_COVER_DAYS")
+            ).solve_for(case_id)
+            allocation = allocation_for(portfolio, case_id)
+            if (
+                portfolio is not None
+                and allocation
+                and portfolio["solverStatus"] in ("OPTIMAL", "FEASIBLE")
+                and not item.get("resizedBy")
+                and not conforms(record, allocation)
+            ):
+                revised = resized_plan(ctx, case, record, allocation)
+                if revised is not None:
+                    return self._propose_resized(revised, str(portfolio["portfolioId"]), moment)
         facts = EvidenceReader(ctx).gather(case, record.plan)
         chosen = [o for o in record.plan.options if o.id in record.plan.chosen]
         rationale = " ".join([record.plan.rationale, *(o.rationale for o in chosen)])
-        query = f"Recovery plan for {case.material} at plant {case.plant} ({case_id})"
+        query = grounding_query(case.material, case.plant)
         verification = verify(
             record.plan,
             facts.evidence,
@@ -117,6 +152,7 @@ class VerifierService:
             corroboration=facts.corroboration,
             proposed_at=record.proposed_at,
             minimum_cover=self.config.decimal("DONOR_MIN_COVER_DAYS"),
+            allocation=allocation,
         )
         projection = whatif.projection(ctx, case, None)
         self._record(case_id, plan_version, verification, projection)
@@ -182,6 +218,50 @@ class VerifierService:
             "confidence": str(verification.record.confidence),
             "parts": [p.id for p in result.parts],
         }
+
+    def _propose_resized(
+        self, plan: ProposedPlan, portfolio_id: str, now: datetime
+    ) -> dict[str, Any]:
+        """FR-OPZ-03: the optimizer's sizing becomes the next plan version, which is verified
+        and routed like any proposal (the PlanProposed event brings it back here)."""
+        case_id = plan.case_id
+        record = PlanRecord(plan=plan, proposed_at=now)
+        self.dynamodb.put_item(
+            TableName=self._table,
+            Item=to_item(
+                {
+                    "PK": f"CASE#{case_id}",
+                    "SK": f"PLAN#{plan.plan_version}",
+                    **record.model_dump(mode="json", by_alias=True),
+                    "resizedBy": "optimizer",
+                    "portfolioId": portfolio_id,
+                }
+            ),
+            ConditionExpression="attribute_not_exists(PK)",
+        )
+        self.dynamodb.update_item(
+            TableName=self._table,
+            Key={"PK": {"S": f"CASE#{case_id}"}, "SK": {"S": "META"}},
+            UpdateExpression="SET planVersion = :v",
+            ConditionExpression="planVersion = :old",
+            ExpressionAttributeValues={
+                ":v": {"N": str(plan.plan_version)},
+                ":old": {"N": str(plan.plan_version - 1)},
+            },
+        )
+        self.audit.record(
+            f"CASE#{case_id}",
+            "PLAN_RESIZED",
+            actor="system",
+            case_id=case_id,
+            payload={
+                "planVersion": plan.plan_version,
+                "portfolioId": portfolio_id,
+                "resizedBy": "optimizer",
+            },
+        )
+        self._emit("PlanProposed", case_id, {"planVersion": plan.plan_version})
+        return {"resized": plan.plan_version, "portfolioId": portfolio_id}
 
     def _record(
         self,

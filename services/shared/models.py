@@ -534,12 +534,21 @@ class DialogueMessage(Model):
 
 
 class Portfolio(Model):
+    """FR-OPZ-04: what the optimiser chose per case, what each gave up and the saving.
+    Objective and saving are absent when no feasible allocation was found (FR-OPZ-05)."""
+
     portfolio_id: str
     case_ids: list[CaseId]
     candidate_actions: list[dict[str, Any]]
     solver_status: Literal["OPTIMAL", "FEASIBLE", "INFEASIBLE", "TIMEOUT"]
-    objective: Money
-    saving_vs_single: Money
+    objective: Money | None = None
+    saving_vs_single: Money | None = None
+    single_objective: Money | None = None
+    solved_at: datetime | None = None
+    allocations: list[dict[str, Any]] = Field(default_factory=list)
+    uncovered: list[dict[str, Any]] = Field(default_factory=list)
+    capacities: list[dict[str, Any]] = Field(default_factory=list)
+    excluded: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ScenarioRun(Model):

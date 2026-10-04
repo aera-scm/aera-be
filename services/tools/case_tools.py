@@ -16,13 +16,14 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from services.dialogue.facts import load_facts
 from services.dialogue.policy import Template, render_question
 from services.rules.br_02 import usable
 from services.shared.dynamo import from_item, table_name, to_item
 from services.shared.models import (
+    Action,
     CaseStatus,
     Figure,
     Option,
@@ -37,6 +38,19 @@ from services.tools.context import ToolContext, ToolError, json_dict
 
 COMPONENT = "tools"
 NO_OUTSIDE_MESSAGES = "No messages from outside parties are attached to this case."
+_ACTIONS: TypeAdapter[list[Any]] = TypeAdapter(list[Action])
+
+
+def _same_actions(option: Option, draft: dict[str, Any]) -> bool:
+    """FR-IMP-03: an option executes exactly the actions its `calc_option` result priced."""
+    try:
+        priced = _ACTIONS.validate_python(draft.get("actions") or [])
+    except ValidationError:
+        return False
+    return bool(
+        _ACTIONS.dump_python(priced, mode="json")
+        == _ACTIONS.dump_python(option.actions, mode="json")
+    )
 
 
 def _investigating(ctx: ToolContext, case_id: str) -> Any:
@@ -175,6 +189,8 @@ def request_supplier_info(
     _investigating(ctx, case_id)
     if not isinstance(fields, dict) or set(fields) != {"poNumber"}:
         raise ToolError("supplier question fields may contain only poNumber")
+    if template_id not in {t.value for t in Template}:
+        raise ToolError(f"templateId must be one of {', '.join(t.value for t in Template)} (BR-19)")
     try:
         facts = load_facts(ctx.cases, ctx.sap, case_id, signals=ctx.signals)
         question = render_question(
@@ -283,6 +299,17 @@ def propose_plan(ctx: ToolContext, case_id: str, plan: dict[str, Any]) -> dict[s
             "errors": [
                 f"option {oid}: cost and coverage must be a calc_option result (FR-IMP-03)"
                 for oid in ungrounded
+            ],
+        }
+    mismatched = [o.id for o in proposal.options if not _same_actions(o, drafts[o.id] or {})]
+    if mismatched:
+        return {
+            "accepted": False,
+            "errors": [
+                f"option {oid}: actions must be exactly the actions of the calc_option result "
+                "its cost came from (FR-IMP-03). To combine actions, price each one with "
+                "calc_option, propose each as its own option and choose them together."
+                for oid in mismatched
             ],
         }
     proposal = proposal.model_copy(

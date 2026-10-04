@@ -15,7 +15,7 @@ from typing import Any
 from services.shared.models import Case
 
 PROMPTS = Path(__file__).parent / "prompts"
-PROMPT_VERSION = "supervisor_v4"
+PROMPT_VERSION = "supervisor_v6"
 
 
 def system_prompt(version: str = PROMPT_VERSION) -> str:
@@ -60,8 +60,11 @@ def opening_message(
         [
             f"Mode: {mode}. Reason for this run: {reason or 'new case'}.",
             (
-                "Planner constraints for this plan (propose_plan enforces them): "
+                "Planner constraints for this plan (propose_plan enforces them on the chosen "
+                "options only): "
                 + json.dumps(constraints)
+                + ". Still price and propose two or three options; an option outside the "
+                "constraints may be listed but not chosen."
                 if constraints
                 else "No planner constraints."
             ),

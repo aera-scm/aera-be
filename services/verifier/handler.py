@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from services.optimizer.runtime import lambda_solver
 from services.verifier.logic import Grounding
 from services.verifier.service import VerifierService
 
@@ -49,6 +50,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             timer_target_arn=os.environ.get("AERA_APPROVAL_TIMER_ARN", ""),
             scheduler_role_arn=os.environ.get("AERA_SCHEDULER_ROLE_ARN", ""),
             env=runtime.env(),
+            # BR-20: the portfolio solver runs in its own Lambda container (SRD 6.11).
+            solver=(
+                lambda_solver(runtime.client("lambda"), os.environ["AERA_OPTIMIZER_FUNCTION"])
+                if os.environ.get("AERA_OPTIMIZER_FUNCTION")
+                else None
+            ),
         )
     data = (event.get("detail") or {}).get("data") or {}
     return _service.handle(str(data["caseId"]), int(data["planVersion"]))

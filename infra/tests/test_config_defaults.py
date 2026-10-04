@@ -87,7 +87,7 @@ def test_dr_10_config_items_use_the_srd_key_layout() -> None:
 def test_dr_11_rate_card_prices_the_reference_options() -> None:
     by_type = {entry["actionType"]: entry for entry in RATE_CARD}
 
-    sto = by_type["STO"]
+    sto = next(e for e in RATE_CARD if e["entryId"] == "RC-STO-1020-1010")
     assert (sto["fromPlant"], sto["toPlant"]) == ("1020", "1010")
     assert (sto["fixedCostUsd"], sto["unitCostUsd"], sto["leadTimeHours"]) == (
         Decimal("4100"),
@@ -130,6 +130,7 @@ ALL_KEYS = (
     [f"CFG#{key}" for key in sorted(EXPECTED_DEFAULTS)]
     + [f"RATE#{entry['entryId']}" for entry in RATE_CARD]
     + [f"APPR#{entry['userId']}" for entry in APPROVER_LIMITS]
+    + ["FREIGHT#1000234#1010"]
 )
 
 

@@ -88,8 +88,9 @@ class ControlStore:
             page = self.client.scan(**args)
             for item in page.get("Items", []):
                 data = from_item(item)
-                data.pop("PK", None)
-                data.pop("grantedAt", None)
+                # Seed and admin edits add who/when fields (FR-ADM-01); only the limit counts.
+                for audit_field in ("PK", "grantedAt", "grantedBy", "changedAt", "changedBy"):
+                    data.pop(audit_field, None)
                 limits.append(ApproverLimit.model_validate(data))
             if "LastEvaluatedKey" not in page:
                 return [limit for limit in limits if limit.user_id not in missed]

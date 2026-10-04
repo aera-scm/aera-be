@@ -24,7 +24,9 @@ def case_metrics(
 ) -> dict[str, Any]:
     signals = SignalStore(dynamodb, env).for_case(case_id)
     first = min([s.received_at for s in signals] + [created_at])
-    events = AuditWriter(dynamodb, env).events(f"CASE#{case_id}")
+    # An environment reset reuses case numbers and never deletes audit (FR-ADM-03): only
+    # this case's own events, from its creation on, count.
+    events = [e for e in AuditWriter(dynamodb, env).events(f"CASE#{case_id}") if e.ts >= created_at]
 
     def first_of(*kinds: str) -> datetime | None:
         moments = [e.ts for e in events if e.type in kinds]

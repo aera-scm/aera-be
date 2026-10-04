@@ -159,6 +159,15 @@ class Admin:
                 ),
                 key=lambda row: str(row["entryId"]),
             ),
+            # ADR-0021: freight capacity and customer priority entries (BR-20).
+            "portfolioInputs": sorted(
+                (
+                    {k: v for k, v in row.items() if k not in {"changedBy", "changedAt"}}
+                    for row in rows
+                    if row["PK"].startswith(("FREIGHT#", "PRIO#"))
+                ),
+                key=lambda row: str(row["PK"]),
+            ),
             "approverLimits": sorted(
                 (
                     {k: v for k, v in row.items() if k not in {"PK", "grantedBy", "grantedAt"}}
@@ -229,6 +238,69 @@ class Admin:
             if key in value and (not isinstance(value[key], str) or not value[key].strip()):
                 raise AdminError(f"{key} must be non-empty text")
         return self._replace_catalogue("RATE", entry_id, value, actor, "RATE_CARD_CHANGED")
+
+    def set_portfolio_input(self, identifier: str, raw: Any, actor: str) -> dict[str, Any]:
+        """ADR-0021 (BR-20): create or change a freight capacity (`FREIGHT-{supplier}-{plant}`)
+        or customer priority (`PRIO-{customer}`) entry; both are audited."""
+        if not isinstance(raw, dict):
+            raise AdminError("portfolio input must be an object")
+        kind = raw.get("kind")
+        value: dict[str, Any] = {"kind": kind}
+        if kind == "FREIGHT":
+            supplier, plant = str(raw.get("supplierId") or ""), str(raw.get("plant") or "")
+            if identifier != f"FREIGHT-{supplier}-{plant}" or not supplier or not plant:
+                raise AdminError("freight entry id must be FREIGHT-{supplierId}-{plant}")
+            try:
+                qty = Decimal(str(raw.get("qtyPerDay")))
+                start = date.fromisoformat(str(raw.get("validFrom")))
+                end = date.fromisoformat(str(raw.get("validTo")))
+            except (InvalidOperation, ValueError):
+                raise AdminError("qtyPerDay must be a number and validity ISO dates") from None
+            if not qty.is_finite() or qty < 0 or start > end:
+                raise AdminError("qtyPerDay must be non-negative and validity ordered")
+            value.update(
+                supplierId=supplier,
+                plant=plant,
+                qtyPerDay=qty,
+                validFrom=start.isoformat(),
+                validTo=end.isoformat(),
+            )
+            key = f"FREIGHT#{supplier}#{plant}"
+        elif kind == "PRIO":
+            customer = str(raw.get("customerId") or "")
+            if identifier != f"PRIO-{customer}" or not customer:
+                raise AdminError("priority entry id must be PRIO-{customerId}")
+            try:
+                weight = Decimal(str(raw.get("weight")))
+            except (InvalidOperation, ValueError):
+                raise AdminError("weight must be a number") from None
+            if not weight.is_finite() or not Decimal(1) <= weight <= Decimal(3):
+                raise AdminError("weight must be between 1 and 3")
+            value.update(customerId=customer, weight=weight)
+            key = f"PRIO#{customer}"
+        else:
+            raise AdminError("kind must be FREIGHT or PRIO")
+        previous = self.dynamodb.get_item(
+            TableName=self._config, Key={"PK": {"S": key}}, ConsistentRead=True
+        ).get("Item")
+        old = from_item(previous, keep_decimals=False) if previous else None
+        self.dynamodb.put_item(
+            TableName=self._config,
+            Item=to_item(
+                {"PK": key, **value, "changedBy": actor, "changedAt": self.clock().isoformat()}
+            ),
+        )
+        self.audit.record(
+            "ADMIN",
+            "PORTFOLIO_INPUT_CHANGED",
+            actor=actor,
+            payload={
+                "id": key,
+                "old": {k: v for k, v in (old or {}).items() if k != "PK"} or None,
+                "new": value,
+            },
+        )
+        return value
 
     def set_approver(self, user_id: str, raw: Any, actor: str) -> dict[str, Any]:
         if not isinstance(raw, dict) or raw.get("userId") != user_id:

@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from services.dialogue.policy import Template
 from services.tools import calc, case_tools, reliability, sap_tools, simulate
 from services.tools.context import ToolContext, ToolError
 
@@ -159,8 +160,14 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "request_supplier_info",
         "Request an approved fact question to the supplier of this case's open PO. "
+        "templateId is one of CONFIRM_PARTIAL_QTY (how many pieces are ready), "
+        "CONFIRM_SHIP_DATE (when it ships) or REQUEST_TRACKING (tracking number). "
         "fields must contain only poNumber. Ends the run while dialogue waits.",
-        {"caseId": S, "templateId": S, "fields": {"type": "object"}},
+        {
+            "caseId": S,
+            "templateId": {"type": "string", "enum": [t.value for t in Template]},
+            "fields": {"type": "object"},
+        },
         ("caseId", "templateId", "fields"),
         case_tools.request_supplier_info,
         ends_run=True,

@@ -1,7 +1,9 @@
 """Projection and what-if endpoints (FR-SIM-01..03, AT-19): new projection and checks for an
 edited option; the plan of record, its drafts and its route stay unchanged."""
 
+import itertools
 import json
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -154,3 +156,20 @@ def test_fr_sim_01_a_verified_plan_still_projects(api: Api, ctx: ToolContext) ->
     )
 
     assert (status, body["option"], whatif_status) == (200, "plan", 200)
+
+
+def test_at_19_what_if_checks_pass_with_a_running_clock(
+    api: Api,
+    ctx: ToolContext,  # noqa: F811
+) -> None:
+    """Live 2026-10-04: every what-if check failed "reread evidence unavailable or stale"
+    because evidence was read after the moment the checks were measured from."""
+    ticks = itertools.count()
+    running = replace(api, clock=lambda: T0 + timedelta(milliseconds=next(ticks)))
+
+    status, body = call(
+        running, "POST", "/cases/{id}/whatif", {"optionId": "C", "params": {"qty": 400}}
+    )
+
+    assert status == 200, body
+    assert all(c["passed"] for c in body["checks"]), body["checks"]

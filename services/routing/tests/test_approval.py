@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -109,3 +110,45 @@ def test_BR_23_reminder_backup_and_expired_approval(dynamodb: Any) -> None:
         decide(store, digest, actor="backup", now=NOW + timedelta(hours=4))
     with pytest.raises(PermissionError):
         decide(store, digest, now=NOW + timedelta(hours=4))
+
+
+def test_fr_adm_01_an_approver_limit_edited_by_an_admin_still_routes(dynamodb: Any) -> None:
+    """Live 2026-10-04: after an admin edit the entry carried changedBy/changedAt and every
+    verification crashed while reading approver limits."""
+    from services.api.admin import Admin
+    from services.routing.store import ControlStore
+    from services.shared.dynamo import to_item
+
+    dynamodb.put_item(
+        TableName="aera-test-config",
+        Item=to_item(
+            {
+                "PK": "APPR#backup@example.test",
+                "userId": "backup@example.test",
+                "role": "approver",
+                "plant": "1010",
+                "limitUsd": 100000,
+                "validFrom": "2026-01-01",
+                "validTo": "9999-12-31",
+                "grantedBy": "seed",
+                "grantedAt": "2026-09-24T00:00:00Z",
+            }
+        ),
+    )
+    Admin(dynamodb, env="test").set_approver(
+        "backup@example.test",
+        {
+            "userId": "backup@example.test",
+            "role": "approver",
+            "plant": "1030",
+            "limitUsd": 90000,
+            "validFrom": "2026-01-01",
+            "validTo": "9999-12-31",
+        },
+        actor="user:admin-1",
+    )
+
+    [limit] = [
+        x for x in ControlStore(dynamodb, "test").limits() if x.user_id == "backup@example.test"
+    ]
+    assert (limit.plant, limit.limit_usd) == ("1030", Decimal(90000))

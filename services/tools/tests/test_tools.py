@@ -479,6 +479,33 @@ def test_fr_imp_03_invented_costs_are_refused(ctx: ToolContext, photo: Signal) -
     assert "calc_option" in result["errors"][0]
 
 
+def test_fr_imp_03_actions_must_match_the_priced_option(ctx: ToolContext, photo: Signal) -> None:
+    """A transfer's price and coverage cannot carry air-freight actions it was not priced for."""
+    options = reference_options(ctx, photo)
+    by_id = {o["id"]: o for o in options}
+    by_id["C"]["actions"] = [*by_id["C"]["actions"], *by_id["A"]["actions"]]
+
+    result = case_tools.propose_plan(
+        ctx, CASE, {"options": options, "chosen": ["C"], "rationale": "x"}
+    )
+
+    assert result["accepted"] is False
+    assert any("option C" in e and "actions" in e for e in result["errors"])
+
+
+def test_fr_imp_03_changed_action_quantity_is_refused(ctx: ToolContext, photo: Signal) -> None:
+    options = reference_options(ctx, photo)
+    by_id = {o["id"]: o for o in options}
+    by_id["C"]["actions"] = [{**by_id["C"]["actions"][0], "qty": 900}]
+
+    result = case_tools.propose_plan(
+        ctx, CASE, {"options": options, "chosen": ["C"], "rationale": "x"}
+    )
+
+    assert result["accepted"] is False
+    assert any("option C" in e for e in result["errors"])
+
+
 @pytest.mark.parametrize(
     "plan",
     [
@@ -712,3 +739,15 @@ def test_srd_6_5_propose_plan_tells_the_model_the_plan_shape() -> None:
 def test_br_02_a_piece_quantity_matches_any_piece_unit_code(unit: str) -> None:
     """S/4 may return the internal code ST (Stueck) where a supplier writes PC."""
     assert calc._quantity("640 PC", unit) == Decimal(640)
+
+
+def test_br_19_invented_template_is_refused_with_the_allowed_list(ctx: ToolContext) -> None:
+    """Live 2026-10-04: the model asked for 'TMPL-READY-QTY'; the tool must name the valid ids."""
+    schema = BY_NAME["request_supplier_info"].input_schema()
+    with pytest.raises(ToolError, match="CONFIRM_PARTIAL_QTY"):
+        case_tools.request_supplier_info(ctx, CASE, "TMPL-READY-QTY", {"poNumber": "4500001234"})
+    assert schema["properties"]["templateId"]["enum"] == [
+        "CONFIRM_PARTIAL_QTY",
+        "CONFIRM_SHIP_DATE",
+        "REQUEST_TRACKING",
+    ]

@@ -8,6 +8,7 @@ recorded, so the plan of record, its route and its drafts stay as they are.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from services.optimizer.inputs import CaseProjector, projection_json
@@ -65,6 +66,10 @@ def projection(ctx: ToolContext, case: Case, option_id: str | None) -> dict[str,
 
 
 def whatif(ctx: ToolContext, case: Case, option_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+    # One moment for pricing, re-reads and checks, as in the Verifier: a running clock would
+    # make every re-read look older than the checks (V-01..V-12 "stale").
+    moment = ctx.now()
+    ctx = replace(ctx, clock=lambda: moment)
     record = _record(ctx, case)
     original = _option(record, option_id)
     draft = ctx.dynamodb.get_item(

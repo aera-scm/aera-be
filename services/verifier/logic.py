@@ -262,6 +262,28 @@ def _donor_reason(donor: Donor | None, quantity: Decimal, minimum_cover: Decimal
     return "; ".join(problems) or "donor figures are not finite"
 
 
+def _portfolio_check(
+    plan: ProposedPlan, selected: list[Option], allocation: dict[str, Decimal] | None
+) -> CheckResult:
+    """V-15 (BR-20): the plan uses no more than the latest portfolio allocated to its case.
+    `allocation` maps option id to allocated quantity; None means no competing case."""
+    if allocation is None:
+        return _check("V-15", True, "No competing case: no portfolio allocation applies", None)
+    over = [
+        f"option {option.id} uses {option.coverage_units}, allocated "
+        f"{allocation.get(option.id, ZERO)}"
+        for option in selected
+        if option.coverage_units > allocation.get(option.id, ZERO)
+    ]
+    return _check(
+        "V-15",
+        not over and bool(selected),
+        "Plan must match the latest portfolio allocation",
+        None,
+        reason="; ".join(over) or "nothing allocated to this case",
+    )
+
+
 def verify(
     plan: ProposedPlan,
     evidence: dict[str, OptionEvidence],
@@ -273,6 +295,7 @@ def verify(
     minimum_cover: Decimal = Decimal("2"),
     max_age: timedelta = timedelta(seconds=60),
     max_price_age: timedelta = PRICE_MAX_AGE,
+    allocation: dict[str, Decimal] | None = None,
 ) -> Verification:
     if not aware(now) or not finite(minimum_cover) or max_age <= timedelta(0):
         raise ValueError("invalid verifier clock or cover policy")
@@ -600,6 +623,7 @@ def verify(
                 None,
             )
         )
+    checks.append(_portfolio_check(plan, selected, allocation))
     record = PlanRecord(
         plan=plan.model_copy(deep=True),
         checks=checks,

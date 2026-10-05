@@ -206,7 +206,8 @@ class PortfolioService:
         on_hand = position["unrestricted"]
         keep = max(per_hour * 24 * self.minimum_cover_days, committed)
         held = self.ledger.allocated(material=material, plant=plant)
-        free = max(Decimal(0), min(on_hand - keep, on_hand - held))
+        # Held stock and the kept cover both leave the donor (AT-09): subtract both.
+        free = max(Decimal(0), on_hand - keep - held)
         refs = position["stockSourceRefs"][:1] or [f"SAP:stock/{material}/{plant}"]
         return {
             "resource": f"DONOR#{material}#{plant}",

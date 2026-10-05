@@ -308,3 +308,26 @@ def test_fr_cht_01_planner_constraints_bind_the_portfolio(competing: ToolContext
         e["optionId"] == "A" and "constraints" in e["reason"] and e["caseId"] == CASE
         for e in record["excluded"]
     )
+
+
+def test_br_07_br_08_donor_capacity_leaves_cover_after_held_reservations(
+    competing: ToolContext,
+) -> None:
+    """Live 2026-10-05 (AT-09): with 600 PC already held for an executed transfer, the donor
+    may give only what is left above its minimum cover. Held stock and the cover both leave
+    the donor; taking the smaller of the two let a second transfer through to the ledger."""
+    from services.execution.ledger import Ledger
+
+    service = PortfolioService(competing, solver, Decimal("2"))
+    before = service.donor_capacity("MAT-48219", "1020")["quantity"]
+    Ledger(competing.dynamodb, ENV).reserve(
+        material="MAT-48219",
+        plant="1020",
+        reservation_id="earlier-part",
+        case_id="EXC-2026-0999",
+        quantity=Decimal(100),
+        available=Decimal(100000),
+        source_ref="SAP:stock",
+    )
+
+    assert service.donor_capacity("MAT-48219", "1020")["quantity"] == before - 100

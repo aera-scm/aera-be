@@ -211,7 +211,9 @@ def _donor_ok(donor: Donor | None, quantity: Decimal, minimum_cover: Decimal) ->
         )
     ):
         return False
-    left = donor.on_hand - quantity
+    # Held reservations leave the donor like this transfer does (BR-08); the ledger checks the
+    # same balance at execution, so cover is measured after both (AT-09).
+    left = donor.unreserved - quantity
     projected = (
         donor.projected_stockout is None
         or donor.cover_until is None
@@ -243,7 +245,7 @@ def _check(
 def _donor_reason(donor: Donor | None, quantity: Decimal, minimum_cover: Decimal) -> str:
     if donor is None:
         return "donor stock could not be re-read"
-    left = donor.on_hand - quantity
+    left = donor.unreserved - quantity
     floor = donor.consumption_per_hour * 24 * minimum_cover
     problems = []
     if left < floor:

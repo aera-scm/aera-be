@@ -106,7 +106,7 @@ def reference() -> tuple[ProposedPlan, dict[str, OptionEvidence]]:
             plants=frozenset({"1010", "1020"}),
             suppliers=frozenset({"S1", "S2"}),
             compliance={"S2": "PENDING"},
-            donors={("M1", "1020"): Donor(D(6000), D(100), D(1000), D(1200))},
+            donors={("M1", "1020"): Donor(D(6000), D(100), D(1000), D(6000))},
             calendar_feasible=True,
         )
     plan = ProposedPlan.model_validate(
@@ -182,6 +182,21 @@ def test_checks_fail_closed(check: str, changes: dict[str, Any]) -> None:
         c.check_id == check and c.option_id == "C" and not c.passed for c in result.record.checks
     )
     assert routed(result).tier == 3
+
+
+def test_br_07_at_09_held_reservations_count_against_donor_cover() -> None:
+    """Live 2026-10-05 (AT-09): 600 PC of the donor were already held for an executed
+    transfer. Cover must be measured on what is left after held stock and this transfer, as
+    the ledger does at execution; otherwise a plan passes here and fails at reservation."""
+    plan, facts = reference()
+    # on hand 6000, 1000 held, cover 2 days x 100/h = 4800: 6000 - 1000 - 600 = 4400 < 4800
+    facts["C"] = replace(facts["C"], donors={("M1", "1020"): Donor(D(6000), D(100), D(0), D(5000))})
+
+    checks = {(c.check_id, c.option_id): c for c in verified(plan, facts).record.checks}
+
+    assert not checks[("V-07", "C")].passed
+    assert "4400 left after the transfer" in checks[("V-07", "C")].detail
+    assert checks[("V-08", "C")].passed
 
 
 def v10(minutes_later: int, priced_at: datetime) -> bool:

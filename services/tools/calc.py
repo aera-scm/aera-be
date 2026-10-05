@@ -32,6 +32,7 @@ from services.tools.context import (
 from services.tools.reliability import profile_for
 from services.tools.sap_tools import (
     component_requirements,
+    held_at,
     sap_get_purchase_order,
     stock_position,
 )
@@ -287,9 +288,14 @@ def compute_option(
             raise ToolError(f"no rate card entry for a transfer {donor} -> {case.plant}")
         position = stock_position(ctx, case.material, donor)
         per_hour = position["consumptionPerHour"] or Decimal(0)
-        free = position["unrestricted"] - per_hour * 24 * ctx.config.decimal("DONOR_MIN_COVER_DAYS")
+        held = held_at(ctx, case.material, donor)
+        cover = per_hour * 24 * ctx.config.decimal("DONOR_MIN_COVER_DAYS")
+        free = position["unrestricted"] - cover - held
         if qty > free:
-            raise ToolError(f"plant {donor} has only {free} free above minimum cover (BR-07)")
+            raise ToolError(
+                f"plant {donor} has only {free} free above minimum cover (BR-07) "
+                f"after {held} held for other cases (BR-08)"
+            )
         arrival = now + timedelta(hours=float(rate.lead_time_hours))
         actions: list[dict[str, Any]] = [
             {

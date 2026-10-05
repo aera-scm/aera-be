@@ -241,6 +241,31 @@ def test_find_sources_respects_minimum_cover_and_reports_compliance(ctx: ToolCon
     assert (alternate["supplierId"], alternate["complianceStatus"]) == ("1000871", "UNDER_REVIEW")
 
 
+def test_br_07_at_09_tools_offer_only_donor_stock_not_already_held(ctx: ToolContext) -> None:
+    """Live 2026-10-05 (AT-09): stock held for another case's executed transfer is not free.
+    The tools offered it again, and the second case's transfer failed at reservation."""
+    from services.execution.ledger import Ledger
+
+    Ledger(ctx.dynamodb, ENV).reserve(
+        material="MAT-48219",
+        plant="1020",
+        reservation_id="earlier-part",
+        case_id="EXC-2026-0999",
+        quantity=Decimal(200),
+        available=Decimal(100000),
+        source_ref="SAP:stock",
+    )
+    found = sap_tools.find_sources(
+        ctx, "MAT-48219", "1010", 1240, (T0 + timedelta(hours=6)).isoformat()
+    )
+
+    [transfer] = found["transfers"]
+    assert (transfer["freeQuantity"], transfer["heldQuantity"]) == (400, 200)
+    assert calc.calc_option(ctx, CASE, "STO", {"fromPlant": "1020", "qty": 400})["coverageUnits"]
+    with pytest.raises(ToolError, match="held"):
+        calc.calc_option(ctx, CASE, "STO", {"fromPlant": "1020", "qty": 401})
+
+
 # Impact (FR-IMP-02..04) ----------------------------------------------------------------
 
 

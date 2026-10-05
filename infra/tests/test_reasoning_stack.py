@@ -255,3 +255,19 @@ def test_fr_lrn_tools_that_price_options_read_supplier_reliability(
         if "dynamodb:GetItem" in actions(statement) and "analytics" in json.dumps(statement)
     ]
     assert reads
+
+
+@pytest.mark.parametrize("tool", ["find_sources", "calc_option", "simulate_plan"])
+def test_br_08_tools_that_offer_donor_stock_read_the_ledger(
+    deployment: tuple[dict[str, assertions.Template], Path], tool: str
+) -> None:
+    """Live 2026-10-05: find_sources failed after it started subtracting held stock (AT-09),
+    because its role could not read the ledger table."""
+    template = deployment[0]["reasoning"]
+    role = role_id(template, f"tool{tool.replace('_', '')}FunctionServiceRole")
+    reads = [
+        statement
+        for statement in statements(template, role)
+        if "dynamodb:GetItem" in actions(statement) and "ledger" in json.dumps(statement)
+    ]
+    assert reads

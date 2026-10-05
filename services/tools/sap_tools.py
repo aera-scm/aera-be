@@ -6,6 +6,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
+from services.execution.ledger import Ledger
 from services.shared.partners import load_contacts
 from services.shared.sap_client import SapNotFoundError
 from services.shared.sap_values import at, number, results
@@ -222,6 +223,12 @@ def sap_get_supplier(ctx: ToolContext, supplier_id: str) -> dict[str, Any]:
     )
 
 
+def held_at(ctx: ToolContext, material: str, plant: str) -> Decimal:
+    """Donor stock already held in the ledger for other cases' transfers (BR-08). It is not
+    free to give again: execution reserves against the same balance (AT-09)."""
+    return Ledger(ctx.dynamodb, ctx.env).allocated(material=material, plant=plant)
+
+
 def find_sources(
     ctx: ToolContext, material: str, plant: str, qty_needed: Any, need_by: str
 ) -> dict[str, Any]:
@@ -242,7 +249,8 @@ def find_sources(
         position = stock_position(ctx, material, donor)
         per_hour = position["consumptionPerHour"] or Decimal(0)
         minimum = per_hour * 24 * cover_days
-        free = max(position["unrestricted"] - minimum, Decimal(0))
+        held = held_at(ctx, material, donor)
+        free = max(position["unrestricted"] - minimum - held, Decimal(0))
         rate = ctx.rates.find("STO", now.date(), from_plant=donor, to_plant=plant)
         if free <= 0 or rate is None:
             continue
@@ -255,6 +263,8 @@ def find_sources(
                 "minimumCover": minimum,
                 "minimumCoverDays": cover_days,
                 "minimumCoverRule": "config:DONOR_MIN_COVER_DAYS",
+                "heldQuantity": held,
+                "heldSourceRef": f"ledger:MAT#{material}#PLANT#{donor}",
                 "arrival": arrival,
                 "arrivesBeforeNeed": arrival <= deadline,
                 "stockSourceRefs": position["stockSourceRefs"],

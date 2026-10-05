@@ -39,6 +39,7 @@ from services.shared.sap_client import SapClient
 from services.tools.context import ToolContext
 from services.verifier.automated_reasoning import PolicyAssessment
 from services.verifier.evidence import EvidenceReader
+from services.verifier.grounding import sentences
 from services.verifier.logic import Grounding, Verification, verify
 
 COMPONENT = "verifier"
@@ -52,14 +53,22 @@ NEXT_STATUS = {
 }
 
 
-def grounding_query(material: str, plant: str) -> str:
-    """ADR-0040: RELEVANCE scores how well the rationale answers this question, so it is the
-    question a plan rationale answers (which action, how many, arriving when, at what cost),
-    not a title. Grounding of each sentence against the facts is unchanged."""
-    return (
-        f"Which actions does the recovery plan for {material} at plant {plant} choose, "
-        "with quantity, arrival and cost?"
-    )
+# ADR-0042 (replaces the ADR-0040 wording): RELEVANCE scores how well the rationale answers
+# this question. Measured live against the same sources, it gave real rationales 0.92-1.00
+# and texts without a decision or without figures 0.00-0.22; the ADR-0040 wording, which named
+# the material and plant, gave the same real rationales 0.19-0.99.
+GROUNDING_QUERY = (
+    "Which recovery actions were chosen: how many PC from which plant or supplier, "
+    "arriving when, at what cost in USD?"
+)
+
+
+def grounding_rationale(plan: ProposedPlan) -> str:
+    """The plan rationale and the chosen options' rationales, each sentence once (ADR-0042):
+    the plan rationale usually repeats the options' own words, and a repeated sentence only
+    skews RELEVANCE and the per-sentence mean G."""
+    chosen = [o.rationale for o in plan.options if o.id in plan.chosen]
+    return " ".join(dict.fromkeys(sentences(" ".join([plan.rationale, *chosen]))))
 
 
 @dataclass
@@ -141,14 +150,12 @@ class VerifierService:
                 if revised is not None:
                     return self._propose_resized(revised, str(portfolio["portfolioId"]), moment)
         facts = EvidenceReader(ctx).gather(case, record.plan)
-        chosen = [o for o in record.plan.options if o.id in record.plan.chosen]
-        rationale = " ".join([record.plan.rationale, *(o.rationale for o in chosen)])
-        query = grounding_query(case.material, case.plant)
+        rationale = grounding_rationale(record.plan)
         verification = verify(
             record.plan,
             facts.evidence,
             now=moment,
-            grounding=self.grounding(rationale, facts.source, query),
+            grounding=self.grounding(rationale, facts.source, GROUNDING_QUERY),
             corroboration=facts.corroboration,
             proposed_at=record.proposed_at,
             minimum_cover=self.config.decimal("DONOR_MIN_COVER_DAYS"),

@@ -257,7 +257,7 @@ def test_fr_lrn_tools_that_price_options_read_supplier_reliability(
     assert reads
 
 
-@pytest.mark.parametrize("tool", ["find_sources", "calc_option"])
+@pytest.mark.parametrize("tool", ["find_sources", "calc_option", "simulate_plan"])
 def test_br_08_tools_that_offer_donor_stock_read_the_ledger(
     deployment: tuple[dict[str, assertions.Template], Path], tool: str
 ) -> None:

@@ -45,7 +45,7 @@ CALCULATORS = {"calc_impact", "calc_option"}
 # FR-LRN-02: option pricing reads the supplier reliability profile.
 RELIABILITY_READERS = {"get_supplier_reliability", "calc_option", "simulate_plan"}
 # BR-07/BR-08 (ADR-0043): donor stock already held for other cases is not offered again.
-LEDGER_READERS = {"find_sources", "calc_option"}
+LEDGER_READERS = {"find_sources", "calc_option", "simulate_plan"}
 
 
 def _schema(spec: ToolSpec) -> agentcore.CfnGatewayTarget.SchemaDefinitionProperty:

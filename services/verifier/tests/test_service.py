@@ -426,12 +426,46 @@ def test_br_23_reference_approval_window_is_open_with_the_sto_in_place(
     assert T0 < deadline <= T0 + timedelta(hours=4)
 
 
-def test_fr_ver_03_adr_0040_relevance_query_is_the_question_a_rationale_answers() -> None:
-    from services.verifier.service import grounding_query
+def test_fr_ver_03_adr_0042_relevance_query_asks_for_the_chosen_actions() -> None:
+    """ADR-0042: one question for every plan. Live it separated real rationales (relevance
+    0.92-1.00) from controls without a decision or figures (0.00-0.22)."""
+    from services.verifier.service import GROUNDING_QUERY
 
-    query = grounding_query("MAT-48219", "1010")
-    assert query.endswith("?") and "MAT-48219" in query and "1010" in query
-    assert all(word in query for word in ("quantity", "arrival", "cost"))
+    assert GROUNDING_QUERY == (
+        "Which recovery actions were chosen: how many PC from which plant or supplier, "
+        "arriving when, at what cost in USD?"
+    )
+
+
+def test_fr_ver_03_adr_0042_each_rationale_sentence_is_checked_once(
+    ctx: ToolContext,  # noqa: F811
+    photo: Signal,  # noqa: F811
+    verifier: VerifierService,
+) -> None:
+    """ADR-0042: the plan rationale usually repeats the chosen options' own rationales. A
+    repeated sentence adds nothing; live it moved relevance from 0.96 to 0.37."""
+    seen: list[tuple[str, str]] = []
+
+    def grounding(rationale: str, source: str, query: str) -> Grounding:
+        seen.append((rationale, query))
+        return GOOD
+
+    said = {"C": "Option C transfers 600 PC from plant 1020.", "A": "Option A flies 640 PC."}
+    options = [
+        {**option, "rationale": said.get(str(option["id"]), option["rationale"])}
+        for option in reference_options(ctx, photo)
+    ]
+    result = case_tools.propose_plan(
+        ctx,
+        CASE,
+        {"options": options, "chosen": ["C", "A"], "rationale": f"{said['C']} {said['A']}"},
+    )
+    assert result["accepted"] is True, result
+    replace(verifier, grounding=grounding).handle(CASE, 1)
+
+    [(rationale, query)] = seen
+    assert rationale == f"{said['C']} {said['A']}"
+    assert query.startswith("Which recovery actions were chosen")
 
 
 def test_fr_opz_03_a_resized_plan_is_recorded_audited_and_proposed(

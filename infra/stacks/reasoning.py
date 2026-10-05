@@ -44,6 +44,8 @@ CASE_WRITERS = {"ask_planner", "request_supplier_info", "propose_plan", "escalat
 CALCULATORS = {"calc_impact", "calc_option"}
 # FR-LRN-02: option pricing reads the supplier reliability profile.
 RELIABILITY_READERS = {"get_supplier_reliability", "calc_option", "simulate_plan"}
+# BR-07/BR-08 (ADR-0043): donor stock already held for other cases is not offered again.
+LEDGER_READERS = {"find_sources", "calc_option"}
 
 
 def _schema(spec: ToolSpec) -> agentcore.CfnGatewayTarget.SchemaDefinitionProperty:
@@ -120,6 +122,8 @@ class ReasoningStack(Stack):
                 tables["dialogue"].grant_read_write_data(fn)
             if spec.name in RELIABILITY_READERS:
                 tables["analytics"].grant_read_data(fn)
+            if spec.name in LEDGER_READERS:
+                tables["ledger"].grant_read_data(fn)
             fn.grant_invoke(gateway_role)
             agentcore.CfnGatewayTarget(
                 self,

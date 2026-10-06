@@ -8,7 +8,7 @@ from services.routing.logic import Route, eligible
 from services.shared.audit import AuditWriter, TransactionConflictError
 from services.shared.cases import CaseStore, ConcurrentUpdateError, IllegalTransitionError
 from services.shared.dynamo import from_item, table_name, to_item
-from services.shared.models import ApproverLimit, CaseStatus
+from services.shared.models import ApproverLimit, Case, CaseStatus
 from services.verifier.logic import Verification, plan_hash
 
 
@@ -326,8 +326,119 @@ class ControlStore:
             raise ApprovalConflict("approval changed; refresh current plan") from None
         return changed
 
+    def reallocate(
+        self,
+        case: Case,
+        plan: dict[str, Any] | None,
+        *,
+        portfolio_id: str,
+        trigger: str,
+        now: datetime,
+    ) -> str:
+        """FR-OPZ-03 (ADR-0044): a portfolio solve re-sized this case while it awaits approval.
+        One transaction supersedes the undecided approval and either stores the optimizer's
+        sizing (`plan`) as the next version, announced by `PlanProposed`, or, with nothing the
+        case can still run (`plan` None), escalates it. The case moves to INVESTIGATING; the
+        verifier moves it on to PLAN_PROPOSED when the event arrives. An approval decided
+        first wins: its revision, or the case's status and version, fail the transaction."""
+        case_id = case.case_id
+        version = case.plan_version
+        route = self.get(case_id, f"ROUTE#{version}")
+        if case.status is not CaseStatus.AWAITING_APPROVAL or route is None:
+            return "not awaiting approval"
+        pending: list[dict[str, Any]] = []
+        for summary in route["parts"]:
+            part = self.get(case_id, f"PART#{summary['id']}") or {}
+            if int(summary["tier"]) == 1 or part.get("decision") or part.get("expired"):
+                return "approval already decided or expired"
+            if int(summary["tier"]) == 2 and not part.get("superseded"):
+                pending.append(part)
+        target = CaseStatus.INVESTIGATING if plan is not None else CaseStatus.ESCALATED
+        following = version + 1 if plan is not None else version
+        writes: list[dict[str, Any]] = [
+            {
+                "Update": {
+                    "TableName": self.table,
+                    "Key": to_item({"PK": f"CASE#{case_id}", "SK": "META"}),
+                    "UpdateExpression": (
+                        "SET #status = :to, #stage = :stage, updatedAt = :now, "
+                        "planVersion = :following"
+                    ),
+                    "ConditionExpression": "#status = :from AND planVersion = :version",
+                    "ExpressionAttributeNames": {"#status": "status", "#stage": "stage"},
+                    "ExpressionAttributeValues": to_item(
+                        {
+                            ":to": target.value,
+                            ":from": CaseStatus.AWAITING_APPROVAL.value,
+                            ":stage": case.model_copy(update={"status": target}).stage,
+                            ":now": now.isoformat(),
+                            ":following": following,
+                            ":version": version,
+                        }
+                    ),
+                }
+            }
+        ]
+        for part in pending:
+            writes.append(
+                {
+                    "Update": {
+                        "TableName": self.table,
+                        "Key": to_item({"PK": f"CASE#{case_id}", "SK": f"PART#{part['id']}"}),
+                        "UpdateExpression": (
+                            "SET superseded = :yes, supersededBy = :following, "
+                            "revision = revision + :one"
+                        ),
+                        "ConditionExpression": "revision = :revision",
+                        "ExpressionAttributeValues": to_item(
+                            {
+                                ":yes": True,
+                                ":following": following,
+                                ":one": 1,
+                                ":revision": part["revision"],
+                            }
+                        ),
+                    }
+                }
+            )
+        if plan is not None:
+            writes.append(self._put({"PK": f"CASE#{case_id}", "SK": f"PLAN#{following}", **plan}))
+            writes.append(
+                self._outbox(case_id, str(following), "PlanProposed", {"planVersion": following})
+            )
+        else:
+            writes.append(
+                self._outbox(
+                    case_id,
+                    f"{version}#PORTFOLIO_REALLOCATED",
+                    "PlanRouted",
+                    {"tier": 3, "reason": "PORTFOLIO_REALLOCATED"},
+                )
+            )
+        try:
+            self.audit.record(
+                f"CASE#{case_id}",
+                "STATE_TRANSITION",
+                actor="system",
+                case_id=case_id,
+                payload={
+                    "from": CaseStatus.AWAITING_APPROVAL.value,
+                    "to": target.value,
+                    "reason": "PORTFOLIO_REALLOCATED",
+                    "portfolioId": portfolio_id,
+                    "reallocatedFor": trigger,
+                    "planVersion": following,
+                },
+                extra=writes,
+            )
+        except TransactionConflictError:
+            return "changed concurrently"
+        return "reproposed" if plan is not None else "escalated"
+
     def tick(self, case_id: str, part_id: str, *, now: datetime) -> None:
         part = self.get(case_id, f"PART#{part_id}")
+        if part is not None and part.get("superseded"):
+            return  # FR-OPZ-03: the portfolio re-proposed the plan; this approval is void
         if (
             part is not None
             and part["expired"]

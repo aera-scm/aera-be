@@ -24,16 +24,17 @@ from services.optimizer.runtime import (
     PortfolioService,
     Solver,
     allocation_for,
+    candidate_id,
     conforms,
     resized_plan,
 )
 from services.routing.logic import Policy, Route, route
 from services.routing.store import ControlStore
 from services.shared.audit import AuditWriter
-from services.shared.cases import CaseStore
+from services.shared.cases import CaseStore, ConcurrentUpdateError
 from services.shared.config import Config
 from services.shared.dynamo import table_name, to_item
-from services.shared.models import CaseStatus, PlanRecord, ProposedPlan
+from services.shared.models import Case, CaseStatus, PlanRecord, ProposedPlan
 from services.shared.runtime import emit
 from services.shared.sap_client import SapClient
 from services.tools.context import ToolContext
@@ -113,11 +114,17 @@ class VerifierService:
         case = self.cases.get(case_id)
         if case is None or case.plan_version != plan_version:
             return {"skipped": "not the current plan version"}
-        if case.status is not CaseStatus.PLAN_PROPOSED:
-            return {"skipped": f"case is {case.status.value}"}
         item = self.control.get(case_id, f"PLAN#{plan_version}")
         if item is None:
             return {"skipped": "plan missing"}
+        if (
+            case.status is CaseStatus.INVESTIGATING
+            and item.get("reallocatedFor")
+            and case.active_run_id is None
+        ):
+            case = self._resume_reallocated(case_id) or case
+        if case.status is not CaseStatus.PLAN_PROPOSED:
+            return {"skipped": f"case is {case.status.value}"}
         for key in ("PK", "SK"):
             item.pop(key, None)
         record = PlanRecord.from_stored(item)
@@ -134,21 +141,30 @@ class VerifierService:
             actor="verifier",
         )
         allocation = None
+        reproposed: dict[str, str] = {}
         if self.solver is not None:
             portfolio = PortfolioService(
                 ctx, self.solver, self.config.decimal("DONOR_MIN_COVER_DAYS")
             ).solve_for(case_id)
             allocation = allocation_for(portfolio, case_id)
+            solved = (
+                portfolio
+                if portfolio is not None and portfolio["solverStatus"] in ("OPTIMAL", "FEASIBLE")
+                else None
+            )
             if (
-                portfolio is not None
+                solved is not None
                 and allocation
-                and portfolio["solverStatus"] in ("OPTIMAL", "FEASIBLE")
                 and not item.get("resizedBy")
                 and not conforms(record, allocation)
             ):
                 revised = resized_plan(ctx, case, record, allocation)
                 if revised is not None:
-                    return self._propose_resized(revised, str(portfolio["portfolioId"]), moment)
+                    return self._propose_resized(revised, str(solved["portfolioId"]), moment)
+            if solved is not None:
+                # The case goes on to verification with this solve: the other members whose
+                # approval it re-sized are re-proposed now (FR-OPZ-03, ADR-0044).
+                reproposed = self._repropose_members(ctx, solved, case_id)
         facts = EvidenceReader(ctx).gather(case, record.plan)
         rationale = grounding_rationale(record.plan)
         verification = verify(
@@ -219,12 +235,74 @@ class VerifierService:
                 result = Route(3, result.version_hash, reason="AUTOMATED_REASONING_DISAGREEMENT")
         self.control.save(verification, result, plant=case.plant, now=now)
         self._settle(case_id, result)
-        return {
+        outcome: dict[str, Any] = {
             "tier": result.tier,
             "reason": result.reason,
             "confidence": str(verification.record.confidence),
             "parts": [p.id for p in result.parts],
         }
+        if reproposed:
+            outcome["reproposed"] = reproposed
+        return outcome
+
+    def _repropose_members(
+        self, ctx: ToolContext, portfolio: dict[str, Any], case_id: str
+    ) -> dict[str, str]:
+        """FR-OPZ-03 (ADR-0044): every other member that waits for approval on a plan this
+        solve re-sized gets the optimizer's sizing as its next version, or escalates when
+        nothing it can run is left. A plan that is already the optimizer's sizing is never
+        re-proposed (loop guard), and a member whose chosen options were not all in the model
+        is left alone: its allocation does not describe its plan."""
+        portfolio_id = str(portfolio["portfolioId"])
+        candidates = {str(c["id"]) for c in portfolio.get("candidateActions") or []}
+        outcomes: dict[str, str] = {}
+        for member in portfolio["caseIds"]:
+            other = self.cases.get(member) if member != case_id else None
+            if other is None or other.status is not CaseStatus.AWAITING_APPROVAL:
+                continue
+            item = self.control.get(member, f"PLAN#{other.plan_version}")
+            if item is None or item.get("resizedBy"):
+                continue
+            for key in ("PK", "SK"):
+                item.pop(key, None)
+            record = PlanRecord.from_stored(item)
+            if any(candidate_id(member, o) not in candidates for o in record.plan.chosen):
+                continue
+            allocation = allocation_for(portfolio, member) or {}
+            if conforms(record, allocation):
+                continue
+            revised = resized_plan(ctx, other, record, allocation)
+            stored = (
+                None
+                if revised is None
+                else {
+                    **PlanRecord(plan=revised, proposed_at=ctx.now()).model_dump(
+                        mode="json", by_alias=True
+                    ),
+                    "resizedBy": "optimizer",
+                    "portfolioId": portfolio_id,
+                    "reallocatedFor": case_id,
+                }
+            )
+            outcomes[member] = self.control.reallocate(
+                other, stored, portfolio_id=portfolio_id, trigger=case_id, now=ctx.now()
+            )
+        return outcomes
+
+    def _resume_reallocated(self, case_id: str) -> Case | None:
+        """The second half of a re-proposal: the case left AWAITING_APPROVAL for INVESTIGATING
+        in the reallocation transaction; its `PlanProposed` moves it on to PLAN_PROPOSED.
+        A duplicate delivery that lost the race reads the state the winner left."""
+        try:
+            return self.cases.transition(
+                case_id,
+                CaseStatus.PLAN_PROPOSED,
+                actor="system",
+                reason="PORTFOLIO_REALLOCATED",
+                expected=CaseStatus.INVESTIGATING,
+            )
+        except ConcurrentUpdateError:
+            return self.cases.get(case_id)
 
     def _propose_resized(
         self, plan: ProposedPlan, portfolio_id: str, now: datetime

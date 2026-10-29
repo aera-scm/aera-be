@@ -59,6 +59,28 @@ def test_hosted_ui_domain_does_not_publish_the_account_id(template: assertions.T
     assert domain["Fn::Join"][1][0] == "aera-dev-"
 
 
+def test_hosted_ui_uses_branded_managed_login_for_the_console_client(
+    template: assertions.Template,
+) -> None:
+    template.has_resource_properties("AWS::Cognito::UserPoolDomain", {"ManagedLoginVersion": 2})
+    brandings = template.find_resources("AWS::Cognito::ManagedLoginBranding")
+    assert len(brandings) == 1
+    branding = next(iter(brandings.values()))
+    props = branding["Properties"]
+    clients = template.find_resources(
+        "AWS::Cognito::UserPoolClient", {"Properties": {"GenerateSecret": False}}
+    )
+    assert props["ClientId"] == {"Ref": next(iter(clients))}
+    assert "UseCognitoProvidedValues" not in props
+    assert {(a["Category"], a["Extension"]) for a in props["Assets"]} == {
+        ("FORM_LOGO", "PNG"),
+        ("PAGE_BACKGROUND", "SVG"),
+    }
+    assert all(a["Bytes"] for a in props["Assets"])
+    assert props["Settings"]["components"]["form"]["logo"]["enabled"] is True
+    assert branding["DependsOn"]
+
+
 def test_nfr_sec_04_hosted_console_origin_is_shared_by_cognito_and_cors() -> None:
     app = build_app(
         DataSettings(

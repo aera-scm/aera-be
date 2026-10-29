@@ -11,7 +11,7 @@ dependencies = [
     "constructs==10.8.1",
     "httpx==0.28.1",
     "pydantic==2.13.5",
-    "pypdf==6.19.0",
+    "pypdf==6.21.2",
     "python-ulid==4.0.1",
     "reportlab==4.4.9",
 ]

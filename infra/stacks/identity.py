@@ -1,5 +1,7 @@
 """Cognito foundation; workload identities arrive with runtimes (SRD 6.16)."""
 
+import base64
+from pathlib import Path
 from typing import Any
 
 from aws_cdk import CfnOutput, Fn, RemovalPolicy, SecretValue, Stack
@@ -8,6 +10,91 @@ from aws_cdk import aws_cognito as cognito
 from constructs import Construct
 
 from infra.environments import require_deployable_environment
+
+_LOGIN_ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "login"
+_LOGIN_ASSETS = (
+    ("FORM_LOGO", "PNG", "form-logo.png"),
+    ("PAGE_BACKGROUND", "SVG", "page-background.svg"),
+)
+_BLUE, _BLUE_DARK, _NAVY, _MUTED = "2868e8ff", "1554d1ff", "152749ff", "5c6d88ff"
+# Sign-in page styling in the console's palette; Cognito merges unset keys with its defaults.
+_LOGIN_SETTINGS: dict[str, Any] = {
+    "categories": {
+        "global": {
+            "colorSchemeMode": "LIGHT",
+            "pageHeader": {"enabled": False},
+            "pageFooter": {"enabled": False},
+            "spacingDensity": "REGULAR",
+        },
+        "form": {
+            "displayGraphics": True,
+            "instructions": {"enabled": False},
+            "languageSelector": {"enabled": False},
+            "location": {"horizontal": "CENTER", "vertical": "CENTER"},
+            "sessionTimerDisplay": "NONE",
+        },
+    },
+    "components": {
+        "pageBackground": {"image": {"enabled": True}, "lightMode": {"color": "f7f9fcff"}},
+        "form": {
+            "borderRadius": 20,
+            "backgroundImage": {"enabled": False},
+            "logo": {
+                "enabled": True,
+                "location": "CENTER",
+                "position": "TOP",
+                "formInclusion": "IN",
+            },
+            "lightMode": {"backgroundColor": "ffffffff", "borderColor": "dfe8f6ff"},
+        },
+        "pageText": {
+            "lightMode": {"headingColor": _NAVY, "bodyColor": _MUTED, "descriptionColor": _MUTED}
+        },
+        "primaryButton": {
+            "lightMode": {
+                "defaults": {"backgroundColor": _BLUE, "textColor": "ffffffff"},
+                "hover": {"backgroundColor": _BLUE_DARK, "textColor": "ffffffff"},
+                "active": {"backgroundColor": _BLUE_DARK, "textColor": "ffffffff"},
+                "disabled": {"backgroundColor": "c9d7eeff", "borderColor": "c9d7eeff"},
+            }
+        },
+        "secondaryButton": {
+            "lightMode": {
+                "defaults": {
+                    "backgroundColor": "ffffffff",
+                    "borderColor": "dce4efff",
+                    "textColor": "485b79ff",
+                },
+                "hover": {"backgroundColor": "f0f5ffff", "borderColor": _BLUE, "textColor": _BLUE},
+                "active": {
+                    "backgroundColor": "e4eeffff",
+                    "borderColor": _BLUE_DARK,
+                    "textColor": _BLUE_DARK,
+                },
+            }
+        },
+    },
+    "componentClasses": {
+        "buttons": {"borderRadius": 10},
+        "input": {
+            "borderRadius": 10,
+            "lightMode": {
+                "defaults": {"backgroundColor": "fcfdffff", "borderColor": "d7e1efff"},
+                "placeholderColor": "8a96a8ff",
+            },
+        },
+        "inputLabel": {"lightMode": {"textColor": "344b6bff"}},
+        "focusState": {"lightMode": {"borderColor": _BLUE}},
+        "link": {
+            "lightMode": {"defaults": {"textColor": _BLUE}, "hover": {"textColor": _BLUE_DARK}}
+        },
+        "divider": {"lightMode": {"borderColor": "e8edf5ff"}},
+    },
+}
+
+
+def _asset(name: str) -> str:
+    return base64.b64encode((_LOGIN_ASSET_DIR / name).read_bytes()).decode("ascii")
 
 
 class IdentityStack(Stack):
@@ -132,7 +219,25 @@ class IdentityStack(Stack):
                 Fn.select(0, Fn.split("-", Fn.select(2, Fn.split("/", self.stack_id)))),
             ],
         )
-        cognito.CfnUserPoolDomain(self, "HostedDomain", user_pool_id=pool.ref, domain=domain)
+        # Managed login (version 2) is the current Hosted UI; the same /oauth2 endpoints and
+        # PKCE flow apply, only the sign-in pages carry the AERA branding below.
+        hosted_domain = cognito.CfnUserPoolDomain(
+            self, "HostedDomain", user_pool_id=pool.ref, domain=domain, managed_login_version=2
+        )
+        branding = cognito.CfnManagedLoginBranding(
+            self,
+            "ConsoleBranding",
+            user_pool_id=pool.ref,
+            client_id=client.ref,
+            settings=_LOGIN_SETTINGS,
+            assets=[
+                cognito.CfnManagedLoginBranding.AssetTypeProperty(
+                    category=category, color_mode="LIGHT", extension=extension, bytes=_asset(name)
+                )
+                for category, extension, name in _LOGIN_ASSETS
+            ],
+        )
+        branding.add_dependency(hosted_domain)
         self.pool_id = pool.ref
         self.issuer = Fn.join("", [f"https://cognito-idp.{self.region}.amazonaws.com/", pool.ref])
         self.token_url = Fn.join(

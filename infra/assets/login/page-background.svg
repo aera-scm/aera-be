@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f0f6ff"/>
+      <stop offset="0.5" stop-color="#fbfdff"/>
+      <stop offset="1" stop-color="#e6efff"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.78" cy="0.22" r="0.55">
+      <stop offset="0" stop-color="#c9def9" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#c9def9" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.15" cy="0.85" r="0.45">
+      <stop offset="0" stop-color="#d8e6ff" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#d8e6ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#base)"/>
+  <rect width="1600" height="1000" fill="url(#glow)"/>
+  <rect width="1600" height="1000" fill="url(#glow2)"/>
+  <g fill="none" stroke="#bdd3f7">
+    <ellipse cx="1330" cy="230" rx="330" ry="280" transform="rotate(-25 1330 230)" stroke-dasharray="6 9" opacity="0.7"/>
+    <ellipse cx="1330" cy="230" rx="420" ry="350" transform="rotate(-25 1330 230)" opacity="0.45"/>
+    <circle cx="240" cy="860" r="260" opacity="0.4"/>
+    <circle cx="240" cy="860" r="360" stroke-dasharray="4 10" opacity="0.35"/>
+  </g>
+  <path d="M1188 128l9 22 22 9-22 9-9 22-9-22-22-9 22-9z" fill="#5b91ef" opacity="0.55"/>
+  <path d="M386 690l6 14 14 6-14 6-6 14-6-14-14-6 14-6z" fill="#5b91ef" opacity="0.4"/>
+</svg>

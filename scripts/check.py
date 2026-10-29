@@ -39,7 +39,10 @@ def check(name: str) -> None:
     elif name == "secrets":
         run(sys.executable, "scripts/security.py")
     elif name == "audit":
-        run("pip-audit", "--local")
+        # ADR-0045: mcp is pinned below 2.2 by strands-agents and used only as the agent's
+        # SigV4 client of its own AgentCore Gateway; remove these when strands allows 2.2.
+        mcp_advisories = ("CVE-2026-59951", "CVE-2026-116684", "CVE-2026-116685", "CVE-2026-116686")
+        run("pip-audit", "--local", *(f"--ignore-vuln={vuln}" for vuln in mcp_advisories))
         run("pnpm", "audit", "--audit-level", "low")
         if (ROOT / "sap-mirror" / "package.json").exists():
             run("pnpm", "--dir", "sap-mirror", "audit", "--audit-level", "low")

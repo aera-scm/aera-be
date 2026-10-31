@@ -204,6 +204,6 @@ grace period — shortened so the case reopens at least an hour before stock-out
 
 ## Try it yourself
 
-- Watch the recorded run: [media/aera-demo.mp4](media/aera-demo.mp4).
+- Watch the recorded run: [media/aera-demo.mp4](https://github.com/aera-scm/aera-be/raw/main/docs/media/aera-demo.mp4) (3:37).
 - Run the console offline with labelled demo data: see [aera-fe](https://github.com/aera-scm/aera-fe).
 - Deploy the full system to your own AWS account: [DEPLOYMENT.md](DEPLOYMENT.md).

@@ -48,9 +48,9 @@ SAP on its own.
 
 ## Demo
 
-[![AERA demo video](docs/media/demo-poster.png)](docs/media/aera-demo.mp4)
+![AERA demo highlights](docs/media/demo-preview.gif)
 
-**[▶ Watch the demo (3:37, MP4)](docs/media/aera-demo.mp4)** — recorded end to end against the
+**[▶ Full demo video (3:37, MP4, 22 MB)](https://github.com/aera-scm/aera-be/raw/main/docs/media/aera-demo.mp4)** — recorded end to end against the
 live AWS environment: the agent escalates because a quantity was confirmed only by the
 carrier, the planner confirms it, AERA re-plans, the stock transfer runs automatically, the
 air freight goes to an approver on a phone, and both are written to SAP with their undo steps.

@@ -5,7 +5,7 @@
 **Agentic AI that takes a supply chain exception from a raw supplier message to a verified, approved and reversible correction in SAP S/4HANA.**
 
 🏆 **1st place — AWS / SAP Agentic AI Hackathon, Asia Pacific 2026** (Intelligent Supply Chain track)<br>
-640 entries → 40 finalists → 1 winner
+640 teams → 40 finalist teams → 1 winning team · hosted by AWS, SAP, APP and Sokrates BINUS
 
 [Demo video](#demo) · [How it works](docs/HOW_IT_WORKS.md) · [Architecture](docs/ARCHITECTURE.md) · [Safety and governance](docs/GOVERNANCE.md) · [Console (aera-fe)](https://github.com/aera-scm/aera-fe)
 
@@ -210,9 +210,10 @@ recorded against that live environment. The code deploys again with one command
 
 All scenario data — companies, suppliers, people, phone numbers, emails — is synthetic.
 
-## Author
+## Team
 
-**Raynald Arvan Lim** — [github.com/DlegendZ](https://github.com/DlegendZ)
+Built by a team of three for the hackathon. Repository maintained by
+**Raynald Arvan Lim** — [github.com/DlegendZ](https://github.com/DlegendZ).
 
 ## License
 

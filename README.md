@@ -1,275 +1,219 @@
-# AERA — backend, agent and infrastructure
+<div align="center">
 
-AERA (Autonomous Exception Resolution Agent) takes a supply chain exception from a raw external signal — a supplier email, a PDF order confirmation, a photographed confirmation sent by WhatsApp, or a carrier notice — through to a verified, approved and reversible correction in SAP S/4HANA.
+# AERA — Autonomous Exception Resolution Agent
 
-This repository holds the backend: the reasoning agent, the deterministic control plane, the infrastructure, the SAP Mirror service and the evaluation harness. The web console lives in `aera-fe`.
+**Agentic AI that takes a supply chain exception from a raw supplier message to a verified, approved and reversible correction in SAP S/4HANA.**
 
-## What it does
+🏆 **1st place — AWS / SAP Agentic AI Hackathon, Asia Pacific 2026** (Intelligent Supply Chain track)<br>
+640 entries → 40 finalists → 1 winner
 
-- **Reads what planners read:** supplier email and PDFs, WhatsApp photos, carrier events, SAP MRP exceptions — in English, Bahasa Indonesia and German.
-- **Grounds every number in SAP.** Figures are fetched, never invented. Where a message and SAP disagree, SAP wins.
-- **Quantifies the impact:** which customer orders are exposed, when stock runs out, how much revenue is at risk.
-- **Proposes options** (inter-plant transfer, expedite, PO re-schedule, alternate supplier) with cost, arrival date and a time-phased stock projection, and optimises across competing cases.
-- **Decides how much to automate:** small, reversible, high-confidence actions run automatically with sampled audit; large or irreversible ones need a named approver.
-- **Executes safely:** deterministic workflow, stock reservation, undo plan saved before the first write, idempotent writes, and the case reopens itself if the goods never arrive.
-- **Asks the supplier directly** when a fact is missing, within strict messaging rules.
+[Demo video](#demo) · [How it works](docs/HOW_IT_WORKS.md) · [Architecture](docs/ARCHITECTURE.md) · [Safety and governance](docs/GOVERNANCE.md) · [Console (aera-fe)](https://github.com/aera-scm/aera-fe)
+
+![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![AWS CDK](https://img.shields.io/badge/AWS%20CDK-v2-FF9900?logo=amazonaws&logoColor=white)
+![Amazon Bedrock AgentCore](https://img.shields.io/badge/Amazon%20Bedrock-AgentCore-232F3E?logo=amazonaws&logoColor=white)
+![SAP S/4HANA](https://img.shields.io/badge/SAP-S%2F4HANA%20OData-0FAAFF?logo=sap&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-1%2C399%20passing-2ea44f)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue)
+
+</div>
+
+---
+
+## The problem
+
+It is two in the morning at a car parts plant. A supplier's casting line has failed and the
+brake caliper housing for plant 1010 will run out in about six hours. The news does not
+arrive as clean data. It arrives as a **WhatsApp photo of a delivery note**, an **email with a
+PDF**, a **carrier notice** and an **MRP alarm in SAP** — next to 200 other alarms that do not
+matter tonight.
+
+A planner has to work out which alarm is real, which customer orders are hit, what the
+options cost, who may approve them, and then type the fix into SAP without making it worse.
+That takes hours. **AERA does it in minutes**, and it never lets the language model write to
+SAP on its own.
+
+## What AERA does
+
+| | |
+|---|---|
+| **Reads what planners read** | Supplier email and PDFs, WhatsApp photos, carrier webhooks and SAP MRP exceptions, in English, Bahasa Indonesia and German. 214 MRP messages become 6 real cases, ranked by revenue at risk. |
+| **Grounds every number in SAP** | Every figure on screen carries a `sourceRef` back to the SAP record, rate card or planner confirmation it came from. Where a message and SAP disagree, SAP wins. |
+| **Quantifies the impact** | Which customer orders are exposed, when the line stops, how much revenue is at risk. |
+| **Proposes and optimises** | Inter-plant transfer, air freight, PO re-schedule, alternate supplier — with cost, arrival and a time-phased stock projection. A CP-SAT solver allocates shared stock across competing cases. |
+| **Verifies deterministically** | 15 coded checks (V-01..V-15), a grounding score and Amazon Bedrock Automated Reasoning re-check every plan. The model proposes; code decides. |
+| **Decides how much to automate** | Small, reversible, high-confidence actions run at once (Tier 1). Expensive or irreversible ones go to a named approver with a deadline (Tier 2). Anything uncertain escalates to a human (Tier 3). |
+| **Executes safely** | A Step Functions workflow reserves stock, saves the undo plan **before** the first write, writes idempotently to SAP, verifies each document and reopens the case if the goods never arrive. |
+| **Cannot be talked around** | Supplier content is evidence, never instruction. Prompt injection is quarantined at the gate, and no chat message can approve, execute or change a threshold. |
+
+## Demo
+
+[![AERA demo video](docs/media/demo-poster.png)](docs/media/aera-demo.mp4)
+
+**[▶ Watch the demo (3:37, MP4)](docs/media/aera-demo.mp4)** — recorded end to end against the
+live AWS environment: the agent escalates because a quantity was confirmed only by the
+carrier, the planner confirms it, AERA re-plans, the stock transfer runs automatically, the
+air freight goes to an approver on a phone, and both are written to SAP with their undo steps.
+
+### Screenshots
+
+| | |
+|---|---|
+| ![Overview board](docs/images/overview-board.png) **Overview board** — exceptions ranked by revenue at risk and time to stock-out. | ![Source tooltip](docs/images/source-tooltip.png) **Every figure is sourced** — hover any number to see the SAP record behind it. |
+| ![Signals](docs/images/extracted-fields.png) **Signals and extracted fields** — sender verified, guardrail passed, each field matched against SAP. | ![Options](docs/images/options.png) **Options** — the chosen plan with cost, coverage, deterministic confidence and Automated Reasoning result. |
+| ![Stock projection](docs/images/stock-projection.png) **Stock through time** — with and without the plan, plus a what-if transfer. | ![Portfolio](docs/images/portfolio-allocation.png) **Portfolio allocation** — the optimiser shares scarce stock across cases. |
+| ![Ask AERA](docs/images/ask-aera-refusal.png) **Ask AERA** — asked to skip the approval, it refuses and cites the rule (BR-05, BR-16). | ![Approval](docs/images/approval-dialog.png) **One deliberate approval** — cost, revenue at risk, time left and the undo plan. |
+| ![Execution](docs/images/execute-sap-documents.png) **Governed execution** — SAP document numbers, each with its undo step. | <img src="docs/images/phone-approval-detail.png" width="260" alt="Phone approval"> **Phone-first approvals** for approvers on the move. |
+
+The full walkthrough with every screen is in **[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)**.
 
 ## Architecture
 
-Reasoning runs on Amazon Bedrock AgentCore with the Strands Agents SDK and has read-only tools. Verification, routing, stock reservation and all writes are deterministic services: AWS Step Functions, Lambda, DynamoDB, EventBridge. Document and language understanding use Amazon Textract and Comprehend; safety uses Amazon Bedrock Guardrails. SAP S/4HANA Cloud APIs are the system of record, with an SAP CAP service on SAP BTP for writes.
+```mermaid
+flowchart LR
+  subgraph Channels
+    WA[WhatsApp photo]
+    EM[Supplier email + PDF]
+    CA[Carrier webhook]
+    MRP[SAP MRP exceptions]
+  end
 
-## Layout
+  subgraph Intake["Intake (Lambda + EventBridge)"]
+    GK[Gatekeeper<br/>sender check · Guardrail scan · quarantine]
+    EX[Extraction<br/>Textract · Comprehend · field confidence]
+    CS[Case service<br/>de-duplicate · triage score]
+  end
+
+  subgraph Reasoning["Reasoning (Amazon Bedrock AgentCore)"]
+    AG[Supervisor agent<br/>Strands Agents SDK · Claude]
+    TL[Read-only tools<br/>via AgentCore Gateway]
+  end
+
+  subgraph Control["Deterministic control plane"]
+    VF[Verifier<br/>V-01..V-15 · grounding · Automated Reasoning]
+    RT[Routing<br/>Tier 1 / 2 / 3 · deadlines]
+    OP[Optimizer<br/>OR-Tools CP-SAT]
+    SF[Execution<br/>Step Functions · ledger · undo first]
+    MO[Monitor<br/>goods-receipt check · reopen]
+  end
+
+  SAP[(SAP S/4HANA OData<br/>SAP Mirror)]
+  UI[Planner console<br/>React · Cognito]
+
+  WA & EM & CA & MRP --> GK --> EX --> CS --> AG
+  AG <--> TL
+  TL -- read --> SAP
+  AG -- propose_plan --> VF --> RT
+  VF <--> OP
+  RT -- Tier 1 --> SF
+  RT -- Tier 2 --> UI
+  UI -- approve --> SF
+  SF -- write --> SAP
+  SF --> MO
+  CS & AG & VF & SF -. live trace .-> UI
+```
+
+The language model sits in exactly one box, and that box has read-only tools. Verification,
+routing, stock reservation and every SAP write are ordinary, tested code. Details:
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Agent | Strands Agents SDK on **Amazon Bedrock AgentCore** Runtime + Gateway; Claude Sonnet (supervisor), Amazon Nova Lite (extraction) |
+| Safety | Amazon Bedrock Guardrails (prompt attack, contextual grounding), **Automated Reasoning** policy checks |
+| Documents and language | Amazon Textract, Amazon Comprehend |
+| Workflow | AWS Step Functions (Standard), AWS Lambda (Python 3.12, ARM64), Amazon EventBridge + Scheduler |
+| Optimisation | Google OR-Tools CP-SAT in a Lambda container |
+| Data | Amazon DynamoDB (10 tables, conditional writes), Amazon S3 (Object Lock audit archive), AWS KMS |
+| API and identity | Amazon API Gateway (REST + WebSocket), Amazon Cognito (branded managed login, planner / approver / admin groups) |
+| System of record | SAP S/4HANA OData APIs; **SAP Mirror** — an SAP CAP service generated from SAP's published S/4HANA schemas, on SAP BTP or ECS Fargate |
+| Interop | A2A agent endpoint and read-only MCP server on AgentCore Runtime |
+| Infrastructure | AWS CDK v2 (Python), 10 stacks, budget-gated deploys |
+| Console | React 18, TypeScript, Vite, Cloudscape — see [aera-fe](https://github.com/aera-scm/aera-fe) |
+
+## Results
+
+Measured in the live `dev` environment on the reference scenario (synthetic SAP data):
+
+- **214 MRP messages → 6 actionable cases**; the reference case ranks first at **USD 4.72 M** revenue at risk, **6.2 h** to stock-out.
+- **Hostile signals quarantined**: six injected or look-alike-sender messages stopped at the gate, with audit.
+- **Re-plan in ~60–90 s** of agent time (warm reference run measured at 61 s).
+- **Plan confidence 0.916**, Automated Reasoning `CONSISTENT`, all blocking checks passed.
+- **Urgent partial execution (BR-22)**: the USD 4,100 stock transfer ran immediately as Tier 1; the USD 38,200 air freight waited for a named approver.
+- **Undo saved before the first write**, STO and PO schedule-line split written to SAP, replays produced **no duplicate documents**.
+- **1,399 backend tests** and **108 console unit tests** pass; a **150-case evaluation set** (including 30 adversarial cases) runs offline in CI.
+
+## Repository layout
 
 ```text
-infra/         AWS CDK stacks
-services/      shared, rules, ingestion, agent, tools, verifier, routing, optimizer,
-               workflow, dialogue, analytics, lab, interop, monitor, api
-sap-mirror/    SAP CAP service with the S/4HANA schema
-data/synthetic/ generators for test signals
-eval/          evaluation harness and cases
+infra/            AWS CDK app: data, identity, edge, gate, reasoning, control,
+                  interop, web, observability, mirror stacks + standalone budget app
+services/
+  agent/          supervisor agent (Strands) and versioned system prompts
+  tools/          read-only agent tools (SAP reads, impact and option calculators)
+  gatekeeper/     sender verification, Guardrail scan, quarantine
+  extraction/     Textract / Comprehend field extraction with confidence
+  case_service/   de-duplication, case lifecycle, triage score
+  verifier/       V-01..V-15, grounding, Automated Reasoning, plan confidence
+  routing/        autonomy tiers, urgent split, approval deadlines
+  optimizer/      CP-SAT portfolio allocation and stock projection
+  execution/      Step Functions steps: ledger, undo, idempotent SAP writes
+  monitor/        goods-receipt checks, close or reopen
+  dialogue/       structured supplier questions and reply parsing
+  api/ realtime/  console REST API, chat, what-if, WebSocket push
+  interop/        A2A and MCP endpoints
+  rules/          business rules BR-xx as pure functions
+  lab/            Scenario Lab: generate realistic disruptions on demand
+sap-mirror/       SAP CAP service with the S/4HANA schema and the reference scenario
+eval/             evaluation harness and 150 scored cases
+scripts/          checks, deploy helpers, signal replay, synthetic data
+tests/            cross-service and contract tests
+docs/             architecture, walkthrough, governance, deployment, development
 ```
 
-## Getting started
+## Quick start
 
-Python 3.12.14 and uv 0.12.18 are pinned for the foundation tooling. Install these
-before running the following commands from this repository:
+Everything except the live agent runs locally without an AWS account.
 
 ```sh
-uv sync --locked
-uv run --locked python scripts/check.py
-uv run --locked pre-commit run --all-files
+uv sync --locked                                     # Python 3.12, uv
+uv run --locked python scripts/check.py              # lint, types, tests, secret scan, audit
+uv run --locked python eval/runner.py --subset ci    # offline evaluation harness
+make mirror-local                                    # SAP Mirror on http://localhost:4004
 ```
 
-With GNU Make, `make setup`, `make check` and `make hooks` run the same commands.
-The direct commands also work on Windows without Make. Keep existing Git hooks:
-run pre-commit explicitly rather than replacing an existing `core.hooksPath`.
+To run the console against offline demo data, see [aera-fe](https://github.com/aera-scm/aera-fe).
+Deploying to your own AWS account is described in **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**;
+development workflow and tests in **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
 
-Checks cover Ruff lint/format, strict mypy, YAML, pytest when tests exist, a secret
-scan and a dependency vulnerability audit (NFR-SEC-03, NFR-SEC-06). Package versions
-and transitive hashes are locked in `uv.lock`; CI rejects lockfile drift.
-Pytest failures, collection errors and an empty collection fail the check.
+## Documentation
 
-The secret scan checks tracked and non-ignored candidate files, refuses credential
-file paths without reading their contents, and disables credential verification
-network calls. Lockfiles are excluded from secret detection because they contain
-integrity digests; their dependencies are covered by the vulnerability audit.
-Supply credentials only through runtime environment variables or Secrets Manager.
-
-Dependency installation and vulnerability audits need public registry access;
-installed lint, type, test and secret checks work without AWS. Run selected checks
-with `uv run --locked python scripts/check.py lint typecheck test secrets`.
-CI is validation
-only, with read-only repository permissions and no deployment credentials.
-
-## Budget gate
-
-An AWS Budget with actual-spend alerts at 50, 80 and 100% must exist before any
-other resource, including those created by `cdk bootstrap` (NFR-COST-01, C-02).
-`infra/budget_app.py` is a standalone CDK app holding one native budget resource;
-it deploys with CLI credentials and needs no bootstrap. The CDK CLI is pinned in
-`package.json` and installed with `pnpm install --frozen-lockfile` (Node 24.21.0).
-
-Inputs come from the environment, never from committed files:
-
-| Variable | Meaning |
+| Document | Contents |
 |---|---|
-| `AERA_AWS_PROFILE` | named AWS CLI profile |
-| `AERA_REGION` | deployment region (default `us-east-1`) |
-| `AERA_BUDGET_NAME` | budget name |
-| `AERA_BUDGET_LIMIT_USD` | approved monthly amount in USD |
-| `AERA_BUDGET_RECIPIENTS` | comma-separated alert email addresses (budget creation only) |
+| [How it works](docs/HOW_IT_WORKS.md) | The reference scenario, screen by screen |
+| [Architecture](docs/ARCHITECTURE.md) | Components, trust zones, event flow, data stores, CDK stacks |
+| [Safety and governance](docs/GOVERNANCE.md) | Business rules, verifier checks, autonomy tiers, execution guarantees, prompt-injection defence |
+| [Deployment](docs/DEPLOYMENT.md) | Budget gate, region and model checks, configuration, deploy and teardown |
+| [Development](docs/DEVELOPMENT.md) | Local setup, checks, tests, evaluation harness, CI |
+| [Release runbook](docs/final-runbook.md) | Checklist for a frozen presentation environment |
+| [SAP Mirror metadata](sap-mirror/metadata/README.md) | Official SAP schema inventory and sandbox checks |
 
-```sh
-make budget ENV=dev        # deploy the budget stack, then verify it
-make check-budget          # verify amount, period, thresholds and subscribers
-make bootstrap ENV=dev     # verify the budget, then cdk bootstrap
-make deploy ENV=dev        # verify the budget, cdk bootstrap, then cdk deploy --all
-```
+## Project status
 
-Without Make, run `uv run --locked python scripts/deploy_dev.py <action> --env dev`.
-If an approved budget already exists, skip `make budget`; bootstrap and deploy verify
-the existing budget by name and never change it. A failed verification stops before
-any bootstrap or CloudFormation call. Only `dev` is accepted; `final` is deployed
-from a tagged release, never from a development checkout.
+AERA was built during the hackathon (September–October 2026) and ran live in an AWS `dev`
+environment for the final. After the event the cloud environment was decommissioned to stop
+costs, so the hosted console is no longer online; the demo video and screenshots above were
+recorded against that live environment. The code deploys again with one command
+([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)).
 
-## Region and model checks
+All scenario data — companies, suppliers, people, phone numbers, emails — is synthetic.
 
-All data stays in one region, `us-east-1` (NFR-CMP-02). `MODEL_SMALL_ID` is a bare
-Amazon Nova or Claude model id used by direct regional inference (A-01).
-`MODEL_SUPERVISOR_ID` is an Anthropic Claude model id: either a bare direct regional id
-or, as the one recorded residency exception (ADR-0023), the US geographic inference
-profile (`us.anthropic.claude-...`), whose inference may run in `us-east-1`, `us-east-2`
-or `us-west-2`. Every other profile (`eu.`, `apac.`, `global.`, ...), a US profile for the
-small model, and ARNs are rejected, and every deployment command refuses any other region.
+## Author
 
-```sh
-make check-region                       # offline: region configuration only
-make check-models                       # offline: model id format and family
-make check-region ARGS="--live"         # budget first, then one read-only list call
-                                        # per service: Guardrails, Automated Reasoning,
-                                        # AgentCore, Textract, Comprehend
-make check-models ARGS="--live"         # budget first, then per model: on demand,
-                                        # ACTIVE, authorized, agreement/entitlement
-make check-models ARGS="--live --invoke"  # plus one Converse call, at most 8 tokens
-```
+**Raynald Arvan Lim** — [github.com/DlegendZ](https://github.com/DlegendZ)
 
-Live checks need `AERA_AWS_PROFILE` and `AERA_BUDGET_NAME`. Offline results say
-"not account evidence"; account checks and invocations print on their own labelled
-lines. Without Make, run `uv run --locked python scripts/check_region.py` or
-`scripts/check_model_access.py` with the same arguments.
+## License
 
-## Data layer and configuration
-
-`infra/app.py` is the main CDK app (`cdk.json` at the repository root). It holds the
-`aera-{env}-data` stack, pinned to `us-east-1`:
-
-- the ten DynamoDB tables of the data design (`aera-{env}-cases`, `-signals`, `-trace`,
-  `-ledger`, `-idempotency`, `-audit`, `-dialogue`, `-analytics`, `-config`,
-  `-connections`) with their keys, indexes, streams and `ttl` attributes; on-demand,
-  point-in-time recovery, project KMS key, deletion protection;
-- the `raw` (90-day expiry), `artefacts` and `audit` (Object Lock, compliance mode,
-  90 days) buckets, named `aera-{env}-{component}-{account}-{region}`: KMS-encrypted,
-  no public access, HTTPS with TLS 1.2 or later only;
-- the project KMS key `alias/aera-{env}`, the `aera-{env}` event bus;
-- SSM parameters `/aera/{env}/{KEY}` for model, Guardrail and SAP settings. Values not
-  provisioned yet hold the literal `UNSET`, never a guessed id or URL;
-- empty Secrets Manager containers `/aera/{env}/sap/sandbox-api-key` and
-  `/aera/{env}/sap/mirror-oauth-client`.
-
-Every resource is tagged `project`, `env`, `component` and `owner`; set `AERA_OWNER_TAG`.
-The case service reserves one concurrent execution. Lambda refuses any reservation while
-the account's concurrency limit is at its floor of 10; set
-`AERA_CASE_SERVICE_RESERVED_CONCURRENCY=0` to deploy without it until the limit is raised.
-Case opening stays transactional either way.
-Approved `MODEL_SUPERVISOR_ID` / `MODEL_SMALL_ID` are written to SSM when set, after the
-same validation as `check-models`. To use an existing approved secret instead of a new
-container, set `AERA_SAP_SANDBOX_SECRET_NAME` or `AERA_SAP_MIRROR_SECRET_NAME`.
-
-```sh
-make seed-config ENV=dev         # Config-table defaults; never overwrites existing values
-make provision-secrets ENV=dev   # SAP_SANDBOX_API_KEY from your shell into the container
-```
-
-`provision-secrets` reads the key only from the `SAP_SANDBOX_API_KEY` variable of its
-own process, never from arguments or files, and never prints it.
-
-## SAP Mirror
-
-`sap-mirror/` is a SAP CAP service that exposes the entity sets of the six S/4HANA APIs
-AERA uses (IR-02) under `/sap/opu/odata/sap/<API>`, the same path layout as an S/4HANA
-tenant, so switching to a licensed system is a configuration change (IR-03). It is labelled
-as an OData service with the S/4HANA schema, not SAP S/4HANA itself.
-
-- **Schema:** `db/s4.cds` is generated by `scripts/generate-model.mjs` from SAP's published
-  service schemas, which `scripts/fetch-sap-schemas.mjs` downloads by pinned integrity into
-  a gitignored cache. `model/fields.json` selects the fields; a name SAP does not define
-  fails generation. When the official EDMX inventory exists in `sap-mirror/metadata/`, a
-  test checks every field and type against it.
-- **Writes as S/4HANA does them:** CSRF token fetch, `If-Match` ETags (428 without, 412 when
-  stale), deep insert of stock transport orders, schedule-line split, goods receipts.
-- **Reference scenario:** `db/seed/*.csv` hold the SRD 6.6.3 data with dates relative to
-  `SCENARIO_T0` (`{T0+9d}` style tokens). `POST /admin/reset` restores it for any T0.
-  All data is synthetic: `.example` domains and phone numbers from the range reserved for
-  fiction.
-- **Custom entities** live in the customer-namespace service `ZAERA_MIRROR_SRV`: the MRP
-  exception feed and consumption rates. `ComplianceStatus` extends `A_Supplier`.
-
-```sh
-make mirror-local                       # SQLite in memory, seeded, http://localhost:4004
-node sap-mirror/scripts/fetch-sap-schemas.mjs && make mirror-model   # regenerate the model
-cd sap-mirror && mbt build && cf deploy mta_archives/aera-sap-mirror_0.0.0.mtar   # SAP BTP
-make register-mirror ENV=dev URL=https://<mirror-host>   # MIRROR_CLIENT_* in your shell
-```
-
-Production uses XSUAA client credentials and SAP HANA Cloud (`mta.yaml`,
-`xs-security.json`); dummy authentication exists only in the development profile.
-
-Without SAP BTP, set `AERA_MIRROR_HOSTING=ecs`: the deployment then adds the
-`aera-{env}-mirror` stack, which runs the Mirror as one ECS Fargate task with its `aws`
-profile (in-memory SQLite, access tokens of the Cognito user pool), puts an API Gateway
-HTTP API in front of it and registers the URL and OAuth client by itself. The data returns
-to the reference scenario whenever the task restarts.
-
-## SAP sandbox prerequisite
-
-Read-only SAP transport and official metadata checks are described in
-[`sap-mirror/metadata/README.md`](sap-mirror/metadata/README.md) (IR-01, IR-02).
-Synthetic test success is not live sandbox or schema evidence.
-
-## Identity and deployment foundations
-
-The main CDK app synthesizes all nine stacks in SRD 6.16. Cognito has
-planner/approver/admin groups and a public authorization-code client; no users
-are created. The future browser client must use PKCE S256. Dev callbacks use
-`http://localhost:5173/callback` and logout uses `http://localhost:5173/`.
-The private `aera-dev-web-{account}-{region}` bucket is encrypted and requires TLS 1.2. CloudFront,
-the console and runtime services remain deferred. Shells contain one unused
-CloudFormation wait-condition handle (no wait condition) to make valid templates;
-the handle URL is never output. The budget app remains independent.
-
-### Optional GitHub OIDC (NFR-SEC-03/06)
-
-OIDC resources are omitted unless `AERA_GITHUB_REPOSITORY` is explicitly set to
-the approved `owner/repository`. Enabling it also requires `AERA_CDK_QUALIFIER`,
-`AERA_BUDGET_NAME` and `AERA_GITHUB_PROVIDER_MODE` (`create` or `existing`). Keep
-the provider mode unchanged after provisioning: changing it removes an owned
-provider. Use `existing` only for a provider managed outside this stack.
-
-Trust permits only `repo:<approved-repository>:ref:refs/heads/main` with audience
-`sts.amazonaws.com`. The deployment role can assume only that qualifier's deploy,
-file-publishing and lookup roles in the current account and approved region,
-read the selected budget, and read the bootstrap version. The same scoped
-delegation includes the qualifier's image-publishing role for the ARM64 supervisor
-container. It cannot bootstrap or assume roles from another qualifier or region.
-PR validation has no OIDC permission. No frontend role is provisioned yet.
-
-Before enabling hosted deployment, the account owner must approve a dedicated dev
-bootstrap qualifier and a customer CloudFormation execution policy restricted
-to WP-0 resources in dev (including IAM role/provider operations), with no final
-access and no AdministratorAccess. The policy is an owner-managed prerequisite;
-its contents cannot be inferred from its ARN. Set its ARN locally as
-`AERA_CFN_EXECUTION_POLICY_ARN`. The existing budget-gated bootstrap/deploy command
-passes that policy and qualifier to CDK. Local profile inputs stay private.
-Do not enable hosted deployment until the actual bootstrap roles and execution
-policy have been reviewed in the account.
-
-Configure repository variables `AERA_REGION=us-east-1`, `AERA_OWNER_TAG`,
-`AERA_GITHUB_REPOSITORY`, `AERA_CDK_QUALIFIER`, `AERA_GITHUB_PROVIDER_MODE`,
-`AERA_BUDGET_NAME`, `AERA_BUDGET_LIMIT_USD` and `AERA_DEV_DEPLOY_ROLE_ARN`.
-Preserve any approved model IDs and existing-secret names with the corresponding
-`MODEL_*` and `AERA_SAP_*_SECRET_NAME` variables. These are names/IDs, never keys.
-Set `AERA_DEV_DEPLOY_ENABLED=true` only after initial local provisioning succeeds.
-
-`deploy-dev.yml` requires a successful CI run from a push to main in the same
-repository and checks out that exact tested commit. It gets temporary OIDC
-credentials, verifies the real budget, then deploys the existing foundations.
-It does not bootstrap, provision SAP key values, seed business data, or deploy a
-frontend bundle. Hosted CI, cloud deployment and live SAP evidence remain pending.
-
-Built for the AWS / SAP Agentic AI Hackathon, track: Intelligent Supply Chain.
-
-## Supervisor deployment boundary
-
-The reasoning stack packages each catalogue tool as a separate ARM64 Lambda,
-registers the tools with the IAM-authenticated AgentCore Gateway, and defines the
-supervisor as a Python 3.12 ARM64 container (SRD 6.18). The container build uses
-the frozen uv lockfile and runs as a non-root user. Idle sessions expire after
-15 minutes; maximum lifetime is one hour. Only application source and dependency
-manifests enter the Docker asset, not local configuration, caches or credentials.
-
-CDK builds and publishes the image to the bootstrap ECR repository during the
-existing budget-gated dev deployment. A running Linux Docker engine with ARM64
-build support is required. Synthesis alone neither builds an image nor deploys
-resources. Build the Lambda bundle separately before deployment as before.
-
-The console API emits CaseReadyForRun and returns the chosen run ID; only the
-run-starter invokes AgentCore. Neither runtime nor tool roles can invoke execution
-workflows or send notifications. Model IAM permits direct regional Claude/Nova
-models in us-east-1 and the US Claude inference profile; us-east-2 and us-west-2 are
-reachable only through that profile, and inference in any other region is denied.
-
-Offline tests cover schemas, IAM, packaging, event wiring and scripted reference
-runs. They do not establish a successful image build, ECR publication, live model
-or Gateway invocation, or the required reference-run p95 at most 90 seconds.
-Cloud acceptance requires the approved dev account, budget, model configuration,
-SAP Mirror and CloudFormation execution policy covering the implemented stacks.
+[MIT](LICENSE)
